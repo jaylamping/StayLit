@@ -1,86 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>StayLit</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <header>
-    <div>
-      <h1>StayLit</h1>
-      <p class="lede">Office PC hosts the lights. The phone stays out of it.</p>
-    </div>
-    <div class="header-actions">
-      <button id="refresh" type="button">Refresh</button>
-      <button id="all-off" type="button">All off</button>
-    </div>
-  </header>
-  <p id="status" class="status"></p>
-  <main>
-    <section>
-      <h2>Lights</h2>
-      <ul id="devices" class="devices"></ul>
-    </section>
-    <section id="controls" hidden>
-      <h2 id="controls-title">Light</h2>
-      <label class="row"><input id="power" type="checkbox" /> Power</label>
-      <label>Hue <input id="hue" type="range" min="0" max="360" value="30" /></label>
-      <label>Saturation <input id="saturation" type="range" min="0" max="100" value="80" /></label>
-      <label>Brightness <input id="brightness" type="range" min="0" max="100" value="70" /></label>
-      <label>Kelvin <input id="kelvin" type="range" min="1500" max="9000" step="50" value="3500" /></label>
-      <label>Fade <input id="fade" type="range" min="0" max="5000" step="50" value="400" /></label>
-      <div class="swatch" id="swatch"></div>
-      <div class="row">
-        <button id="apply-color" type="button">Apply color</button>
-        <button id="save-look" type="button">Save look</button>
-      </div>
-      <div id="strip" hidden>
-        <h3>Strip</h3>
-        <div id="zones" class="zones"></div>
-        <div class="row">
-          <label>From <input id="from-hue" type="range" min="0" max="360" value="20" /></label>
-          <label>To <input id="to-hue" type="range" min="0" max="360" value="200" /></label>
-        </div>
-        <div class="row">
-          <button id="load-zones" type="button">Load zones</button>
-          <button id="paint-zone" type="button">Paint selected zone</button>
-          <button id="apply-gradient" type="button">Apply gradient</button>
-        </div>
-      </div>
-      <h3>Hosted effects</h3>
-      <p class="hint">These keep running in the background after this window closes. Quitting the tray stops them.</p>
-      <div class="row">
-        <button id="start-cycle" type="button">Color cycle</button>
-        <button id="start-gradient" type="button">Moving gradient</button>
-        <button id="stop-effect" type="button">Stop effect</button>
-      </div>
-      <p id="effect-status" class="hint"></p>
-    </section>
-    <section>
-      <h2>Session</h2>
-      <label>On login
-        <select id="login-action">
-          <option value="off">Do nothing</option>
-          <option value="look">Apply saved look</option>
-          <option value="color-cycle">Start color cycle</option>
-          <option value="moving-gradient">Start moving gradient</option>
-        </select>
-      </label>
-      <button id="save-login" type="button">Save login</button>
-      <h3>Logout white</h3>
-      <p class="hint">One shot when the session ends. Not a hosted effect. Default is 3800K at full brightness.</p>
-      <label>Kelvin <input id="logout-kelvin" type="range" min="3500" max="4000" step="50" value="3800" /></label>
-      <label>Brightness <input id="logout-brightness" type="range" min="1" max="100" value="100" /></label>
-      <div class="row">
-        <button id="save-logout" type="button">Save logout white</button>
-        <button id="run-logout" type="button">Send logout white</button>
-      </div>
-      <label class="row"><input id="autostart" type="checkbox" /> Start with Windows</label>
-      <p id="hook-note" class="hint"></p>
-    </section>
-  </main>
-  <script src="main.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StayLit</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

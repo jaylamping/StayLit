@@ -14,9 +14,13 @@ function normalizeEffectSpec(spec) {
     throw new CommandError('bad_effect', 'Effect spec is required');
   }
   if (spec.kind === 'color-cycle') {
+    const deviceIds = Array.isArray(spec.deviceIds)
+      ? spec.deviceIds.filter((id) => typeof id === 'string' && id.length > 0)
+      : null;
     return {
       kind: 'color-cycle',
       deviceId: spec.deviceId === undefined || spec.deviceId === null ? null : String(spec.deviceId),
+      deviceIds,
       intervalMs: Math.max(50, spec.intervalMs === undefined ? 1000 : effectNumber(spec.intervalMs, 0, 60000, 'intervalMs')),
       durationMs: spec.durationMs === undefined ? 800 : effectNumber(spec.durationMs, 0, 60000, 'durationMs'),
       step: spec.step === undefined ? 15 : effectNumber(spec.step, 1, 360, 'step'),
@@ -66,6 +70,7 @@ function createColorCycle(spec) {
   return {
     kind: spec.kind,
     deviceId: spec.deviceId,
+    deviceIds: spec.deviceIds && spec.deviceIds.length ? spec.deviceIds : null,
     intervalMs: spec.intervalMs,
     durationMs: spec.durationMs,
     step: spec.step,
@@ -76,18 +81,26 @@ function createColorCycle(spec) {
     async tick(player) {
       const hue = this.hue;
       this.hue = (this.hue + this.step) % 360;
-      const ids = this.deviceId ? [this.deviceId] : await player.deviceIds();
+      const ids = this.deviceIds && this.deviceIds.length
+        ? this.deviceIds
+        : this.deviceId
+          ? [this.deviceId]
+          : await player.deviceIds();
+      const color = {
+        hue,
+        saturation: this.saturation,
+        brightness: this.brightness,
+        kelvin: this.kelvin
+      };
       for (let i = 0; i < ids.length; i += 1) {
         await player.setColor({
           deviceId: ids[i],
-          hue,
-          saturation: this.saturation,
-          brightness: this.brightness,
-          kelvin: this.kelvin,
+          ...color,
           durationMs: this.durationMs,
           wait: false
         });
       }
+      return { lights: ids.map((deviceId) => ({ deviceId, ...color })) };
     }
   };
 }
@@ -128,6 +141,10 @@ function createMovingGradient(spec) {
         writes,
         wait: false
       });
+      const zones = shifted.map(({ hue, saturation, brightness, kelvin }) => ({ hue, saturation, brightness, kelvin }));
+      return {
+        lights: [{ deviceId: this.deviceId, ...zones[Math.floor(zones.length / 2)], zones }]
+      };
     }
   };
 }
@@ -150,10 +167,27 @@ function delay(ms, signal) {
 }
 
 class EffectRuntime {
-  constructor(sleep = delay) {
-    this.sleep = sleep;
+  constructor(sleep = delay, onFrame = null) {
+    this.sleep = sleep || delay;
+    this.onFrame = onFrame;
     this.controller = null;
     this.state = null;
+  }
+
+  emitFrame(effect, frame) {
+    if (!this.onFrame || !frame || !Array.isArray(frame.lights) || frame.lights.length === 0) {
+      return;
+    }
+    try {
+      this.onFrame({
+        kind: effect.kind,
+        durationMs: effect.durationMs,
+        intervalMs: effect.intervalMs,
+        lights: frame.lights
+      });
+    } catch {
+      // A window that cannot take the frame must not stop the bulbs.
+    }
   }
 
   start(effect, player) {
@@ -178,9 +212,10 @@ class EffectRuntime {
     try {
       while (!signal.aborted && state) {
         try {
-          await state.effect.tick(state.player);
+          const frame = await state.effect.tick(state.player);
           if (!signal.aborted) {
             state.lastError = null;
+            this.emitFrame(state.effect, frame);
           }
         } catch (err) {
           if (!signal.aborted) {
@@ -222,6 +257,7 @@ class EffectRuntime {
       running: true,
       kind: this.state.effect.kind,
       deviceId: this.state.effect.deviceId,
+      deviceIds: this.state.effect.deviceIds || null,
       lastError: this.state.lastError
     };
   }

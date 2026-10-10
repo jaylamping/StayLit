@@ -1,6 +1,7 @@
 mod session;
 mod session_end;
 mod sidecar;
+mod window_bounds;
 
 #[cfg(windows)]
 mod session_win;
@@ -66,19 +67,34 @@ pub fn run() {
                     *note.0.lock().expect("autostart note") = Some(err);
                 }
             }
+            if let Some(window) = app.get_webview_window("main") {
+                window_bounds::restore(&window, &data_dir);
+                let _ = window.show();
+            }
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
+                if let (Ok(pos), Ok(size)) = (window.outer_position(), window.inner_size()) {
+                    window_bounds::note_size(pos, size);
+                }
+                window_bounds::flush();
                 perform(window.app_handle(), ExitReason::WindowClose);
             }
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                if let (Ok(pos), Ok(size)) = (window.outer_position(), window.inner_size()) {
+                    window_bounds::note_size(pos, size);
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             lifx_request,
             autostart_status,
             set_autostart,
-            host_info
+            host_info,
+            hide_window
         ])
         .build(tauri::generate_context!())
         .expect("error while building StayLit")
@@ -163,6 +179,15 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[tauri::command]
+fn hide_window(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        window_bounds::note(&window);
+        window_bounds::flush();
+        let _ = window.hide();
+    }
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -219,8 +244,11 @@ fn ensure_autostart_default(app: &AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn lifx_request(app: AppHandle, method: String, params: Option<Value>) -> Result<Value, String> {
-    send(&app, &method, params.unwrap_or_else(|| json!({})))
+async fn lifx_request(app: AppHandle, method: String, params: Option<Value>) -> Result<Value, String> {
+    let params = params.unwrap_or_else(|| json!({}));
+    tauri::async_runtime::spawn_blocking(move || send(&app, &method, params))
+        .await
+        .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]

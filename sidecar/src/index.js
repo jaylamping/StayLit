@@ -13,7 +13,10 @@ function main() {
   let host;
   try {
     host = createHost({
-      dataDir: process.env.STAYLIT_DATA_DIR || null
+      dataDir: process.env.STAYLIT_DATA_DIR || null,
+      onFrame: (frame) => {
+        void writeLine(JSON.stringify({ event: 'effect.frame', frame }));
+      }
     });
   } catch (err) {
     console.error(err);

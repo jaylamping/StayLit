@@ -1,0 +1,236 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: Outfit;
+  src: url("../fonts/outfit-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: Outfit;
+  src: url("../fonts/outfit-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: block;
+}
+@font-face {
+  font-family: Outfit;
+  src: url("../fonts/outfit-600.woff2") format("woff2");
+  font-weight: 600;
+  font-display: block;
+}
+
+:root {
+  --background: #f4f0ea;
+  --panel: #ede8e0;
+  --raise: #e6e0d7;
+  --foreground: #1c1916;
+  --muted: #6f675e;
+  --dim: #a0978c;
+  --border: rgba(28, 25, 22, 0.1);
+  --border-strong: rgba(28, 25, 22, 0.18);
+  --card: #fffcf8;
+  --primary: #1c1916;
+  --primary-foreground: #f4f0ea;
+  --accent: transparent;
+  --track: #dcd6ce;
+  --rail: #e2ddd5;
+  --seg: #e7e2da;
+  --seg-on: #fffcf8;
+  --cream: #fffcf8;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #100f0d;
+  --panel: #161512;
+  --raise: #211e1a;
+  --foreground: #f3eee6;
+  --muted: #8f877c;
+  --dim: #5d574f;
+  --border: rgba(243, 238, 230, 0.08);
+  --border-strong: rgba(243, 238, 230, 0.15);
+  --card: #1c1a17;
+  --primary: #f3eee6;
+  --primary-foreground: #17150f;
+  --track: #2a2723;
+  --rail: #24211d;
+  --seg: #0c0b0a;
+  --seg-on: #2a2723;
+  --cream: #f3eee6;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: Outfit, "Segoe UI", sans-serif;
+  --color-background: var(--background);
+  --color-panel: var(--panel);
+  --color-raise: var(--raise);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-dim: var(--dim);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-card: var(--card);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-seg: var(--seg);
+  --color-seg-on: var(--seg-on);
+  --color-cream: var(--cream);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-size: 13px;
+  line-height: normal;
+  min-width: 800px;
+  min-height: 520px;
+  user-select: none;
+}
+
+@property --lamp {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e39a45;
+}
+@property --z1 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z2 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z3 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z4 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z5 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z6 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
+/* --fx-ms is the bulbs' fade for the current effect frame, so the window lands when they do.
+   Only the element that sets --lamp eases it; children inherit the eased value. */
+.fx-lamp {
+  transition: --lamp var(--fx-ms, 0ms) linear;
+}
+
+.fx-zones {
+  transition-property: --z1, --z2, --z3, --z4, --z5, --z6, background-color, background-position;
+  transition-duration: var(--fx-ms, 0ms);
+  transition-timing-function: linear;
+}
+
+.fx-lamp.fx-zones {
+  transition-property: --lamp, --z1, --z2, --z3, --z4, --z5, --z6, background-color, background-position;
+}
+
+.fx-slide > span:has(> [role="slider"]),
+.fx-slide .fx-range {
+  transition-property: left, right;
+  transition-duration: var(--fx-ms, 0ms);
+  transition-timing-function: linear;
+}
+
+.set-wash {
+  position: relative;
+  isolation: isolate;
+}
+
+.set-wash::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -18px;
+  right: -26px;
+  left: -26px;
+  height: 240px;
+  pointer-events: none;
+  background: radial-gradient(70% 100% at 12% 0%, color-mix(in srgb, var(--lamp) var(--wash, 14%), transparent), transparent);
+}
+
+.fx-band {
+  position: relative;
+  overflow: hidden;
+}
+
+.fx-band::before {
+  content: "";
+  position: absolute;
+  top: -140px;
+  right: -60px;
+  width: 520px;
+  height: 360px;
+  pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--lamp) var(--glow-strength, 30%), transparent), transparent);
+}
+
+.fx-band > * {
+  position: relative;
+}
+
+.hue-meter {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.hue-wheel {
+  container-type: inline-size;
+}
+
+.hue-wheel .hue-meter {
+  background-repeat: repeat-x;
+  background-size: 400cqi 100%;
+  background-position-x: calc(var(--fx-shift, var(--shift-from)) * 1cqi);
+}
+
+.hue-bead {
+  position: absolute;
+  top: 50%;
+  left: 38%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border: 2.5px solid var(--cream);
+  border-radius: 50%;
+  background: var(--lamp);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--lamp) 90%, transparent);
+}
+
+.zone-bar {
+  display: flex;
+  height: 5px;
+  gap: 2px;
+  margin-top: 5px;
+}
+
+.zone-bar i {
+  flex: 1;
+  border-radius: 1.5px;
+}
