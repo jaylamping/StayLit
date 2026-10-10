@@ -117,6 +117,8 @@ function RoomMenu({ roomName, onOff }: { roomName: string; onOff: () => void }) 
     return state.groups.find((group) => group.id === page.groupId)?.name ?? null;
   });
   const setRoom = useOffice((state) => state.setRoom);
+  const hasLiving = useOffice((state) => state.rooms.some((room) => room.id === "living"));
+  const addLivingRoom = useOffice((state) => state.addLivingRoom);
   return (
     <>
       <div className="flex items-center gap-2 px-1.5 pb-2">
@@ -142,6 +144,17 @@ function RoomMenu({ roomName, onOff }: { roomName: string; onOff: () => void }) 
               {names[index]}
             </Button>
           ))}
+          {hasLiving ? null : (
+            <Button
+              variant="quiet"
+              onClick={() => {
+                addLivingRoom();
+                setOpen(false);
+              }}
+            >
+              Add Living room
+            </Button>
+          )}
         </div>
       ) : null}
     </>
@@ -162,19 +175,37 @@ export const Roster = memo(function Roster() {
     }),
   );
   const notice = useOffice((state) => (state.notice?.scope === roomId ? state.notice.message : null));
-  const looking = useOffice((state) => state.lights.length === 0);
+  const roomCount = useOffice((state) => state.lights.filter((light) => light.roomId === state.roomId).length);
+  const anyLights = useOffice((state) => state.lights.length > 0);
+  const looseIds = useOffice(
+    useShallow((state) => {
+      if (state.page.kind === "group") return [];
+      const room = state.rooms.find((item) => item.id === state.roomId);
+      const taken = new Set(
+        state.groups.filter((group) => room?.groupIds.includes(group.id)).flatMap((group) => group.lightIds),
+      );
+      return state.lights.filter((light) => light.roomId === state.roomId && !taken.has(light.id)).map((light) => light.id);
+    }),
+  );
   const openRoom = useOffice((state) => state.openRoom);
   const roomOff = useOffice((state) => state.roomOff);
   return (
     <aside className="w-[360px] shrink-0 overflow-auto border-r border-border px-2.5 py-3">
       <RoomMenu roomName={roomName} onOff={roomOff} />
       {notice ? <p className="px-2 text-[11px] text-foreground">{notice}</p> : null}
-      {looking ? <p className="px-2 text-sm text-muted">Looking for lights.</p> : null}
-      {looking
-        ? null
-        : groupIds.map((id) => (
-            <GroupBlock key={id} groupId={id} />
+      {roomCount === 0 ? (
+        <p className="px-2 text-sm text-muted">{anyLights ? "No lights in this room." : "Looking for lights."}</p>
+      ) : null}
+      {groupIds.map((id) => (
+        <GroupBlock key={id} groupId={id} />
+      ))}
+      {looseIds.length ? (
+        <ul className="pt-2">
+          {looseIds.map((id) => (
+            <LightRow key={id} id={id} />
           ))}
+        </ul>
+      ) : null}
       {pageKind === "group" ? (
         <Button variant="quiet" className="mt-3 px-2" onClick={() => openRoom()}>
           All of {roomName}

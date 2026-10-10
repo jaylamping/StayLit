@@ -85,7 +85,7 @@ function applyDevice(light: Light, device: DeviceSnap): Light {
   };
 }
 
-export function lightsFromDevices(devices: DeviceSnap[]): Light[] {
+export function lightsFromDevices(devices: DeviceSnap[], roomId: string): Light[] {
   return devices
     .map((device) => {
       const saturation = device.color?.saturation ?? 0;
@@ -104,6 +104,7 @@ export function lightsFromDevices(devices: DeviceSnap[]): Light[] {
         kelvin: device.color?.kelvin ?? 3800,
         hue: device.color?.hue ?? 0,
         saturation,
+        roomId,
       };
       if (kind === "strip" && zones?.length) light.zones = zones;
       return light;
@@ -112,11 +113,16 @@ export function lightsFromDevices(devices: DeviceSnap[]): Light[] {
 }
 
 export function mergeDevices(lights: Light[], devices: DeviceSnap[]) {
-  if (devices.length === 0) return [];
-  const fresh = lightsFromDevices(devices);
-  const previous = new Map(lights.map((light) => [light.id, light]));
-  return fresh.map((light) => {
-    const prior = previous.get(light.id);
-    return prior ? applyDevice(prior, devices.find((device) => device.id === light.id) ?? { id: light.id }) : light;
+  if (devices.length === 0) return lights;
+  const seen = new Set<string>();
+  const next = lights.map((light) => {
+    const device = devices.find((item) => item.id === light.id);
+    if (!device) return light.offline ? light : { ...light, offline: true };
+    seen.add(light.id);
+    return applyDevice(light, device);
   });
+  for (const light of lightsFromDevices(devices, "office")) {
+    if (!seen.has(light.id)) next.push(light);
+  }
+  return next.sort((a, b) => a.name.localeCompare(b.name));
 }

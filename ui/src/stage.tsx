@@ -3,7 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
-import { useOffice, type Light } from "@/store";
+import { cycleSelection, useOffice, type Light } from "@/store";
 
 function lightMeta(light: Light) {
   if (light.offline) return "Offline";
@@ -25,6 +25,16 @@ const LightCard = memo(function LightCard({ id }: { id: string }) {
   const light = useOffice((state) => state.lights.find((item) => item.id === id) ?? null);
   const notice = useOffice((state) => (state.notice?.scope === id ? state.notice.message : null));
   const setBrightness = useOffice((state) => state.setBrightness);
+  const roomIds = useOffice(useShallow((state) => state.rooms.map((room) => room.id)));
+  const roomNames = useOffice(useShallow((state) => state.rooms.map((room) => room.name)));
+  const groupIds = useOffice(useShallow((state) => state.rooms.find((room) => room.id === light?.roomId)?.groupIds ?? []));
+  const groupNames = useOffice(useShallow((state) => {
+    const ids = state.rooms.find((room) => room.id === light?.roomId)?.groupIds ?? [];
+    return ids.map((id) => state.groups.find((group) => group.id === id)?.name ?? id);
+  }));
+  const groupId = useOffice((state) => state.groups.find((group) => group.lightIds.includes(id))?.id ?? null);
+  const assignRoom = useOffice((state) => state.assignRoom);
+  const assignGroup = useOffice((state) => state.assignGroup);
   if (!light) return null;
   return (
     <Card className="mt-5 max-w-[440px]">
@@ -40,6 +50,25 @@ const LightCard = memo(function LightCard({ id }: { id: string }) {
           onValueChange={(value) => setBrightness(light.id, value)}
         />
       </div>
+      <div className="mt-3 flex flex-wrap gap-1">
+        {roomIds.map((roomId, index) => (
+          <Button key={roomId} variant={roomId === light.roomId ? "solid" : "quiet"} onClick={() => assignRoom(light.id, roomId)}>
+            {roomNames[index]}
+          </Button>
+        ))}
+      </div>
+      {groupIds.length ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          <Button variant={groupId === null ? "solid" : "quiet"} onClick={() => assignGroup(light.id, null)}>
+            No group
+          </Button>
+          {groupIds.map((item, index) => (
+            <Button key={item} variant={groupId === item ? "solid" : "quiet"} onClick={() => assignGroup(light.id, item)}>
+              {groupNames[index]}
+            </Button>
+          ))}
+        </div>
+      ) : null}
     </Card>
   );
 });
@@ -101,16 +130,8 @@ export const Stage = memo(function Stage() {
   const lookIds = useOffice(useShallow((state) => state.looks.filter((look) => look.roomId === state.roomId).map((look) => look.id)));
   const otherRoom = useOffice((state) => (state.effect && state.effect.roomId !== state.roomId ? state.rooms.find((room) => room.id === state.effect?.roomId)?.name ?? null : null));
   const setRoom = useOffice((state) => state.setRoom);
-  const cycleTarget = useOffice((state) => {
-    const room = state.rooms.find((item) => item.id === state.roomId);
-    const group = state.groups.find((item) => item.id === room?.groupIds[0]);
-    return group?.name ?? "Lights";
-  });
-  const showGradient = useOffice((state) => {
-    const room = state.rooms.find((item) => item.id === state.roomId);
-    const ids = state.groups.filter((group) => room?.groupIds.includes(group.id)).flatMap((group) => group.lightIds);
-    return state.lights.some((light) => ids.includes(light.id) && light.kind === "strip");
-  });
+  const cycleTarget = useOffice((state) => cycleSelection(state).target);
+  const showGradient = useOffice((state) => state.lights.some((light) => light.roomId === state.roomId && light.kind === "strip"));
   const startCycle = useOffice((state) => state.startCycle);
   const startGradient = useOffice((state) => state.startGradient);
   const stopEffect = useOffice((state) => state.stopEffect);

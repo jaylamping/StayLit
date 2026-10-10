@@ -60,6 +60,23 @@ test('moving gradient shifts zone colors and applies the last write', async () =
   runtime.stopAll();
 });
 
+test('color cycle uses the given lights and skips the rest of the list', async () => {
+  const clock = scriptedSleep();
+  const player = fakePlayer({ devices: [{ id: 'first' }, { id: 'sink' }, { id: 'corner' }] });
+  const runtime = new EffectRuntime(clock.sleep);
+  const effect = createEffect({
+    kind: 'color-cycle',
+    deviceIds: ['sink', 'corner'],
+    step: 15,
+    hue: 0,
+    intervalMs: 1000
+  });
+  await runtime.start(effect, player);
+  assert.deepEqual(player.calls.map((call) => call.deviceId), ['sink', 'corner']);
+  runtime.stopAll();
+  await clock.release();
+});
+
 test('a saved effect spec is data, and a hue step is not a duration', () => {
   const cycle = normalizeEffectSpec({
     kind: 'color-cycle',
