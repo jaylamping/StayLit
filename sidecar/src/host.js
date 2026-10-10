@@ -56,6 +56,10 @@ class Host {
           wait: true
         });
         return { ok: true };
+      case 'setColors':
+        return this.setColors(params);
+      case 'setPowers':
+        return this.setPowers(params);
       case 'getZones':
         return { zones: await this.player.getZones(requireDevice(params.deviceId)) };
       case 'setZones':
@@ -97,6 +101,30 @@ class Host {
     }
   }
 
+  async setColors(params) {
+    const lights = requireList(params.lights, 'lights');
+    const durationMs = normalizeDuration(params.durationMs, 400);
+    const results = await Promise.all(lights.map((item) => settle(item && item.deviceId, async () => {
+      await this.player.setColor({
+        deviceId: requireDevice(item.deviceId),
+        ...normalizeColor(item),
+        durationMs,
+        wait: true
+      });
+    })));
+    return { results };
+  }
+
+  async setPowers(params) {
+    const deviceIds = requireList(params.deviceIds, 'deviceIds');
+    const on = requireBool(params.on);
+    const durationMs = normalizeDuration(params.durationMs, 400);
+    const results = await Promise.all(deviceIds.map((deviceId) => settle(deviceId, async () => {
+      await this.player.setPower({ deviceId: requireDevice(deviceId), on, durationMs, wait: true });
+    })));
+    return { results };
+  }
+
   async writeZones(deviceId, zones, durationMs) {
     const writes = planZoneWrites(zones, normalizeDuration(durationMs, 400));
     await this.player.applyZoneWrites({ deviceId, writes, wait: true });
@@ -126,6 +154,8 @@ function writesBulbs(method) {
   switch (method) {
     case 'setPower':
     case 'setColor':
+    case 'setColors':
+    case 'setPowers':
     case 'setZones':
     case 'setGradient':
     case 'allOff':
@@ -140,6 +170,22 @@ function requireDevice(deviceId) {
     throw new CommandError('bad_device', 'deviceId is required');
   }
   return deviceId;
+}
+
+function requireList(value, label) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new CommandError('bad_request', `${label} must be a non-empty list`);
+  }
+  return value;
+}
+
+async function settle(deviceId, run) {
+  try {
+    await run();
+    return { deviceId, ok: true };
+  } catch (err) {
+    return { deviceId, ok: false, error: err.message };
+  }
 }
 
 function requireBool(value) {
