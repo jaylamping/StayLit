@@ -34,13 +34,14 @@ function foldMeta(lights: Light[], driven: string | null) {
 }
 
 function headerStyle(open: boolean, lamp: string | null): CSSProperties | undefined {
-  if (!open) return undefined;
+  const tone = lamp ? ({ "--lamp": lamp } as CSSProperties) : undefined;
+  if (!open) return tone;
   if (!lamp) return { background: "color-mix(in srgb, var(--foreground) 7%, transparent)", boxShadow: "inset 2px 0 0 var(--foreground)" };
   return {
-    "--lamp": lamp,
+    ...tone,
     background: "linear-gradient(90deg, color-mix(in srgb, var(--lamp) 18%, transparent), color-mix(in srgb, var(--lamp) 6%, transparent))",
     boxShadow: "inset 2px 0 0 var(--lamp)",
-  } as CSSProperties;
+  };
 }
 
 function openLamp(state: OfficeState, target: SetTarget) {
@@ -216,7 +217,7 @@ const GroupBlock = memo(function GroupBlock({ groupId }: { groupId: string }) {
   });
   const notice = useOffice((state) => (state.notice?.scope === groupId ? state.notice.message : null));
   const isOpen = useOffice((state) => state.open.kind === "group" && state.open.groupId === groupId);
-  const lamp = useOffice((state) => (state.open.kind === "group" && state.open.groupId === groupId ? openLamp(state, { kind: "group", groupId }) : null));
+  const lamp = useOffice((state) => openLamp(state, { kind: "group", groupId }));
   const openGroup = useOffice((state) => state.openGroup);
   const setGroupPower = useOffice((state) => state.setGroupPower);
   const [power, count] = summary.split(":");
@@ -246,7 +247,13 @@ const GroupBlock = memo(function GroupBlock({ groupId }: { groupId: string }) {
           {notice ? <span className="ml-auto max-w-28 truncate text-[11px] text-foreground">{notice}</span> : null}
         </button>
         {lightIds.length ? (
-          <Switch label={`${name} power`} checked={power === "on"} mixed={power === "mixed"} group onCheckedChange={(next) => setGroupPower(groupId, next)} />
+          <Switch
+            label={`${name} power`}
+            checked={power === "on"}
+            mixed={power === "mixed"}
+            bulb={lamp ? "var(--lamp)" : null}
+            onCheckedChange={(next) => setGroupPower(groupId, next)}
+          />
         ) : null}
       </div>
       <ul>{rows}</ul>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blendHex, lampFor, nextPaint } from "./paint.ts";
+import { blendHex, lampFor, nextPaint, switchFill } from "./paint.ts";
 
 const whiteBulb = { ability: "color", mode: "white", hue: 0, saturation: 0, kelvin: 6500, brightness: 80, kelvinRange: [2500, 9000] };
 
@@ -47,4 +47,16 @@ test("a group follows the effect's frames once the effect owns a lit member", ()
   assert.equal(all?.ownedShare, 100);
   assert.equal(all?.rest, null);
   assert.equal(lampFor([{ id: "corner", fill: "#4763ff", lit: false, owned: true }]), null);
+});
+
+test("a group switch is tinted like a light's, from its live member color", () => {
+  assert.equal(switchFill({ checked: true, bulb: "var(--lamp)" }), "color-mix(in srgb, var(--lamp) 52%, var(--track))");
+  assert.equal(switchFill({ checked: true, bulb: "#ffce9a" }), switchFill({ checked: true, bulb: "#ffce9a", vivid: false }));
+  assert.equal(switchFill({ checked: false, mixed: true, bulb: "var(--lamp)" }), "color-mix(in srgb, var(--lamp) 18%, var(--track))");
+  assert.equal(switchFill({ checked: true, bulb: "var(--lamp)", vivid: true }), "color-mix(in srgb, var(--lamp) 100%, var(--track))");
+});
+
+test("a switch with every member off falls back to the plain off track", () => {
+  assert.equal(switchFill({ checked: false, bulb: null }), undefined);
+  assert.equal(switchFill({ checked: false, bulb: "var(--lamp)" }), undefined);
 });

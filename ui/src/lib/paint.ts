@@ -51,3 +51,10 @@ export function lampFor(members: { id: string; fill: string; lit: boolean; owned
     rest,
   };
 }
+
+export function switchFill({ checked, mixed = false, bulb, vivid = false }: { checked: boolean; mixed?: boolean; bulb?: string | null; vivid?: boolean }) {
+  if (!checked && !mixed) return undefined;
+  const tint = bulb || "#e39a45";
+  const strength = mixed ? 18 : vivid ? 100 : 52;
+  return `color-mix(in srgb, ${tint} ${strength}%, var(--track))`;
+}

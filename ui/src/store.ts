@@ -12,7 +12,7 @@ import {
   sentPaint,
   stagePaint,
 } from "@/lib/edits";
-import { clearFrames, lastFrames, paintFrame, type EffectFrame } from "@/lib/frames";
+import { clearFrames, endFrames, lastFrames, paintFrame, type EffectFrame } from "@/lib/frames";
 import { lifx, onSidecarEvent, sidecarAvailable } from "@/lib/lifx";
 import { loadWindow, saveWindow } from "@/lib/remember";
 import { nextPaint, type PaintPatch } from "@/lib/paint";
@@ -771,7 +771,10 @@ useOffice.subscribe((state) => {
   if (key === framedKey) return;
   const ended = framedKey !== null;
   framedKey = key;
-  if (ended) settleFrames();
+  if (ended) {
+    settleFrames();
+    endFrames();
+  }
   if (key !== null) clearFrames();
 });
 

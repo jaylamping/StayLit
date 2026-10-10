@@ -564,7 +564,13 @@ const SetPanel = memo(function SetPanel({ target }: { target: SetTarget }) {
           </p>
         </div>
         <ModeSwitch mode={mode} canColor={canColor} onPick={(next) => setSetPaint(target, { mode: next })} />
-        <Switch label={`${name} power`} checked={power === "on"} mixed={power === "mixed"} group onCheckedChange={(on) => setSetPower(target, on)} />
+        <Switch
+          label={`${name} power`}
+          checked={power === "on"}
+          mixed={power === "mixed"}
+          bulb={lamp ? "var(--lamp)" : null}
+          onCheckedChange={(on) => setSetPower(target, on)}
+        />
       </div>
       {notice ? <p className="-mt-1.5 mb-2 text-xs text-foreground">{notice}</p> : null}
       <div className="mb-2.5 flex flex-wrap gap-1">

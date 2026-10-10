@@ -70,6 +70,11 @@ export function lastFrames() {
   return new Map(latest);
 }
 
+export function endFrames() {
+  document.documentElement.style.removeProperty("--fx-ms");
+  written.delete("--fx-ms");
+}
+
 export function clearFrames() {
   const style = document.documentElement.style;
   for (const name of written) style.removeProperty(name);

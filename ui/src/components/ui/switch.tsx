@@ -1,19 +1,17 @@
+import { switchFill } from "@/lib/paint";
 import { cn } from "@/lib/utils";
 
 type SwitchProps = {
   checked: boolean;
   mixed?: boolean;
-  bulb?: string;
+  bulb?: string | null;
   vivid?: boolean;
-  group?: boolean;
   label: string;
   onCheckedChange: (on: boolean) => void;
 };
 
-export function Switch({ checked, mixed = false, bulb, vivid = false, group = false, label, onCheckedChange }: SwitchProps) {
+export function Switch({ checked, mixed = false, bulb, vivid = false, label, onCheckedChange }: SwitchProps) {
   const on = checked && !mixed;
-  const tint = group ? "#e39a45" : (bulb ?? "#e39a45");
-  const strength = group ? 28 : vivid ? 100 : 52;
   return (
     <button
       type="button"
@@ -25,9 +23,7 @@ export function Switch({ checked, mixed = false, bulb, vivid = false, group = fa
         onCheckedChange(mixed || checked ? false : true);
       }}
       className="relative h-5 w-[34px] shrink-0 rounded-[10px] bg-(--track)"
-      style={{
-        background: on || mixed ? `color-mix(in srgb, ${tint} ${mixed ? 18 : strength}%, var(--track))` : undefined,
-      }}
+      style={{ background: switchFill({ checked, mixed, bulb, vivid }) }}
     >
       <span
         className={cn(
