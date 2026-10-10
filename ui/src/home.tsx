@@ -34,7 +34,8 @@ function TitleBar() {
   const modes: ThemeMode[] = ["system", "light", "dark"];
   return (
     <header className="relative z-10 flex h-[42px] shrink-0 items-center gap-2 border-b border-border bg-background px-3.5">
-      <div data-tauri-drag-region className="text-[13px] font-semibold tracking-tight">
+      <div data-tauri-drag-region className="flex items-center gap-2 text-[13px] font-semibold tracking-tight">
+        <span className="size-2 rounded-full bg-[#e39a45]" />
         StayLit
       </div>
       <div data-tauri-drag-region className="h-full flex-1" />

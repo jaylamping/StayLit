@@ -2,6 +2,7 @@ import { memo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { lightSwatch } from "@/lib/devices";
 import { groupCount, groupPower, useOffice, type Light } from "@/store";
 
 function meta(light: Light, driven: string | null) {
@@ -25,7 +26,11 @@ const LightRow = memo(function LightRow({ id }: { id: string }) {
   );
   const setPower = useOffice((state) => state.setPower);
   const selectLight = useOffice((state) => state.selectLight);
+  const drivenColor = useOffice((state) =>
+    state.effect?.lightIds.includes(id) ? state.effect.accent : null,
+  );
   if (!light) return null;
+  const well = drivenColor ?? (light.mode === "white" ? lightSwatch({ mode: "white", kelvin: light.kelvin }, light.color) : light.color);
   const moving = driven === "Moving gradient" && light.ability === "multizone";
   return (
     <li>
@@ -40,8 +45,8 @@ const LightRow = memo(function LightRow({ id }: { id: string }) {
               light.offline
                 ? { boxShadow: "inset 0 0 0 1px var(--border)" }
                 : light.on
-                  ? { background: light.color, boxShadow: `0 0 14px color-mix(in srgb, ${light.color} 45%, transparent)` }
-                  : { boxShadow: `inset 0 0 0 1.5px color-mix(in srgb, ${light.color} 75%, transparent)` }
+                  ? { background: well, boxShadow: `0 0 14px color-mix(in srgb, ${well} 45%, transparent)` }
+                  : { boxShadow: `inset 0 0 0 1.5px color-mix(in srgb, ${well} 75%, transparent)` }
             }
           />
           <span className="min-w-0">
@@ -60,7 +65,7 @@ const LightRow = memo(function LightRow({ id }: { id: string }) {
         {light.offline ? (
           <span className="w-[34px]" />
         ) : (
-          <Switch label={`${light.name} power`} checked={light.on} bulb={light.color} onCheckedChange={(on) => setPower(light.id, on)} />
+          <Switch label={`${light.name} power`} checked={light.on} bulb={well} onCheckedChange={(on) => setPower(light.id, on)} />
         )}
       </div>
     </li>
@@ -87,7 +92,7 @@ const GroupBlock = memo(function GroupBlock({ groupId }: { groupId: string }) {
         <button type="button" className="text-[11px] font-semibold tracking-[0.08em] text-muted uppercase" onClick={() => openGroup(groupId)}>
           {name}
         </button>
-        <span className="text-[11px] text-muted tabular-nums">{on === reachable ? (on > 0 ? "On" : "Off") : `${on} of ${reachable}`}</span>
+        <span className="text-[11px] text-muted tabular-nums">{reachable <= 1 ? (on > 0 ? "On" : "Off") : `${on} of ${reachable}`}</span>
         <div className="flex-1" />
         {notice ? <span className="max-w-28 truncate text-[11px] text-foreground">{notice}</span> : null}
         <Switch
@@ -123,7 +128,7 @@ function RoomMenu({ roomName, onOff }: { roomName: string; onOff: () => void }) 
     <>
       <div className="flex items-center gap-2 px-1.5 pb-2">
         <Button variant="ghost" onClick={() => setOpen((value) => !value)}>
-          {roomName}
+          {roomName} ▾
         </Button>
         {groupLabel ? <span className="text-xs text-muted">{groupLabel}</span> : null}
         <Button variant="ghost" className="ml-auto" onClick={onOff}>
@@ -200,11 +205,14 @@ export const Roster = memo(function Roster() {
         <GroupBlock key={id} groupId={id} />
       ))}
       {looseIds.length ? (
-        <ul className="pt-2">
-          {looseIds.map((id) => (
-            <LightRow key={id} id={id} />
-          ))}
-        </ul>
+        <div className="mt-4 opacity-80">
+          <p className="px-2 text-[11px] text-muted">Not grouped</p>
+          <ul>
+            {looseIds.map((id) => (
+              <LightRow key={id} id={id} />
+            ))}
+          </ul>
+        </div>
       ) : null}
       {pageKind === "group" ? (
         <Button variant="quiet" className="mt-3 px-2" onClick={() => openRoom()}>

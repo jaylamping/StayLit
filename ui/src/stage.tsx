@@ -1,7 +1,6 @@
 import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { cycleSelection, useOffice, type Light } from "@/store";
 
@@ -15,8 +14,15 @@ function lightMeta(light: Light) {
 
 function HueMeter({ accent }: { accent: string }) {
   return (
-    <div className="hue-meter mt-6 max-w-[460px]" style={{ "--meter": accent } as CSSProperties}>
-      <span className="hue-bead" />
+    <div className="mt-3 max-w-[520px]">
+      <div className="hue-meter" style={{ "--meter": accent } as CSSProperties}>
+        <span className="hue-bead" />
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] text-muted">
+        <span>Violet</span>
+        <span>Blue</span>
+        <span>Teal</span>
+      </div>
     </div>
   );
 }
@@ -60,7 +66,7 @@ const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
           value={kelvin}
           min={2500}
           max={9000}
-          color={light.color}
+          color="linear-gradient(90deg, #e7a15a, #f7f4ef)"
           display={`${Math.round(kelvin)}K`}
           onValueChange={(value) => queue({ kelvin: value })}
         />
@@ -109,52 +115,77 @@ const LightCard = memo(function LightCard({ id }: { id: string }) {
   const groupId = useOffice((state) => state.groups.find((group) => group.lightIds.includes(id))?.id ?? null);
   const assignRoom = useOffice((state) => state.assignRoom);
   const assignGroup = useOffice((state) => state.assignGroup);
+  const [moving, setMoving] = useState(false);
   if (!light) return null;
   const white = light.mode === "white";
+  const groupName = groupNames[groupIds.indexOf(groupId ?? "")] ?? "No group";
   return (
-    <Card className="mt-5 max-w-[440px]">
-      <div className="text-sm font-semibold tracking-tight">{light.name}</div>
-      <p className="mt-0.5 text-xs text-muted">{lightMeta(light)}</p>
-      {notice ? <p className="mt-1 text-xs text-foreground">{notice}</p> : null}
-      <span
-        className="mt-3 block size-10 rounded-[9px]"
-        style={
-          light.on
-            ? { background: light.color, boxShadow: `0 0 14px color-mix(in srgb, ${light.color} 45%, transparent)` }
-            : { boxShadow: `inset 0 0 0 1.5px color-mix(in srgb, ${light.color} 75%, transparent)` }
-        }
-      />
-      <div className="mt-3 flex gap-1">
-        {light.ability === "white" ? null : (
-          <Button variant={white ? "quiet" : "solid"} onClick={() => setLightPaint(light.id, { mode: "color" })}>
-            Color
-          </Button>
-        )}
-        <Button variant={white ? "solid" : "quiet"} onClick={() => setLightPaint(light.id, { mode: "white" })}>
-          White
-        </Button>
+    <div className="max-w-[560px]">
+      <div className="flex items-start gap-3">
+        <span
+          className="size-11 shrink-0 rounded-[12px]"
+          style={
+            light.on
+              ? { background: light.color, boxShadow: `0 0 16px color-mix(in srgb, ${light.color} 40%, transparent)` }
+              : { boxShadow: `inset 0 0 0 1.5px color-mix(in srgb, ${light.color} 75%, transparent)` }
+          }
+        />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold tracking-tight">{light.name}</div>
+          <p className="text-xs text-muted">{lightMeta(light)}</p>
+          {notice ? <p className="mt-1 text-xs text-foreground">{notice}</p> : null}
+        </div>
+        <div className="flex rounded-full border border-border p-0.5 text-[12px]">
+          {light.ability === "white" ? null : (
+            <button
+              type="button"
+              className={white ? "rounded-full px-3 py-1 text-muted" : "rounded-full bg-foreground/10 px-3 py-1"}
+              onClick={() => setLightPaint(light.id, { mode: "color" })}
+            >
+              Color
+            </button>
+          )}
+          <button
+            type="button"
+            className={white ? "rounded-full bg-foreground/10 px-3 py-1" : "rounded-full px-3 py-1 text-muted"}
+            onClick={() => setLightPaint(light.id, { mode: "white" })}
+          >
+            White
+          </button>
+        </div>
       </div>
       <PaintSliders light={light} />
-      <div className="mt-3 flex flex-wrap gap-1">
-        {roomIds.map((roomId, index) => (
-          <Button key={roomId} variant={roomId === light.roomId ? "solid" : "quiet"} onClick={() => assignRoom(light.id, roomId)}>
-            {roomNames[index]}
-          </Button>
-        ))}
+      <div className="mt-4 flex items-center gap-2 text-xs text-muted">
+        <span>Group</span>
+        <span className="rounded-full border border-border px-2.5 py-1 text-foreground">{groupName}</span>
+        <button type="button" className="text-muted" onClick={() => setMoving((open) => !open)}>
+          Move…
+        </button>
       </div>
-      {groupIds.length ? (
-        <div className="mt-2 flex flex-wrap gap-1">
-          <Button variant={groupId === null ? "solid" : "quiet"} onClick={() => assignGroup(light.id, null)}>
-            No group
-          </Button>
-          {groupIds.map((item, index) => (
-            <Button key={item} variant={groupId === item ? "solid" : "quiet"} onClick={() => assignGroup(light.id, item)}>
-              {groupNames[index]}
-            </Button>
-          ))}
+      {moving ? (
+        <div className="mt-2 grid gap-2">
+          {groupIds.length ? (
+            <div className="flex flex-wrap gap-1">
+              <Button variant={groupId === null ? "ghost" : "quiet"} onClick={() => assignGroup(light.id, null)}>
+                No group
+              </Button>
+              {groupIds.map((item, index) => (
+                <Button key={item} variant={groupId === item ? "ghost" : "quiet"} onClick={() => assignGroup(light.id, item)}>
+                  {groupNames[index]}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          <div className="flex flex-wrap gap-1">
+            {roomIds.map((roomId, index) => (
+              <Button key={roomId} variant={roomId === light.roomId ? "ghost" : "quiet"} onClick={() => assignRoom(light.id, roomId)}>
+                {roomNames[index]}
+              </Button>
+            ))}
+          </div>
         </div>
       ) : null}
-    </Card>
+    </div>
   );
 });
 
@@ -221,57 +252,75 @@ export const Stage = memo(function Stage() {
   const startGradient = useOffice((state) => state.startGradient);
   const stopEffect = useOffice((state) => state.stopEffect);
   const here = effect?.roomId === roomId ? effect : null;
+  const band = here?.accent;
   return (
-    <section className="min-w-0 flex-1 px-8 py-7">
-      {here ? (
-        <div>
-          <p className="text-[11px] font-semibold tracking-[0.14em] text-muted uppercase">Running</p>
-          <h1 className="mt-2 text-[28px] font-medium tracking-tight">{here.name}</h1>
-          <p className="mt-1 text-sm text-muted">{here.target}</p>
-          {here.kind === "color-cycle" ? <HueMeter accent={here.accent} /> : (
-            <div className="mt-6 max-w-[460px] overflow-hidden rounded-full">
-              <div className="effect-zones" />
+    <section className="flex min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div
+          className="shrink-0 border-b border-border px-6 py-4"
+          style={
+            band
+              ? { background: `linear-gradient(180deg, color-mix(in srgb, ${band} 32%, transparent), transparent 85%)` }
+              : undefined
+          }
+        >
+          <div className="flex items-start gap-4">
+            <div className="min-w-0 flex-1">
+              {here ? (
+                <>
+                  <p className="text-[11px] font-semibold tracking-[0.14em] text-muted uppercase">Running</p>
+                  <h1 className="text-[26px] font-medium tracking-tight">{here.name}</h1>
+                  <p className="text-sm text-muted">on {here.target}</p>
+                  {here.kind === "color-cycle" ? <HueMeter accent={here.accent} /> : (
+                    <div className="mt-3 max-w-[520px] overflow-hidden rounded-full">
+                      <div className="effect-zones" />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <h1 className="text-[26px] font-medium tracking-tight">Nothing running</h1>
+                  <p className="mt-1 text-sm text-muted">Lights stay as you set them.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" className="rounded-xl border border-border px-3.5 py-2 text-left" onClick={() => startCycle()}>
+                      <span className="block text-sm font-semibold">Color cycle</span>
+                      <span className="block text-xs text-muted">{cycleTarget}</span>
+                    </button>
+                    {showGradient ? (
+                      <button type="button" className="rounded-xl border border-border px-3.5 py-2 text-left" onClick={() => startGradient()}>
+                        <span className="block text-sm font-semibold">Moving gradient</span>
+                        <span className="block text-xs text-muted">Lightstrip</span>
+                      </button>
+                    ) : null}
+                  </div>
+                </>
+              )}
+              {notice ? <p className="mt-2 text-sm text-foreground">{notice}</p> : null}
+              {otherRoom && effect && !here ? (
+                <Button variant="quiet" className="mt-2" onClick={() => setRoom(effect.roomId)}>
+                  Show {otherRoom}
+                </Button>
+              ) : null}
             </div>
-          )}
-          {notice ? <p className="mt-3 text-sm text-foreground">{notice}</p> : null}
-          <Button className="mt-6" onClick={() => stopEffect()}>
-            Stop
-          </Button>
-        </div>
-      ) : (
-        <div>
-          <h1 className="text-[28px] font-medium tracking-tight">Nothing running</h1>
-          <p className="mt-2 text-sm text-muted">Lights stay as you set them.</p>
-          {otherRoom && effect ? (
-            <Button variant="quiet" className="mt-3" onClick={() => setRoom(effect.roomId)}>
-              Show {otherRoom}
-            </Button>
-          ) : null}
-          {selectedId ? <LightCard id={selectedId} /> : null}
-          <div className="mt-6 max-w-[440px]">
-            <h2 className="mb-1.5 text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">Looks</h2>
-            {lookIds.map((id) => (
-              <LookRow key={id} id={id} />
-            ))}
-            <Button variant="quiet" className="mt-1 px-2">
-              Save this look
-            </Button>
-          </div>
-          {notice ? <p className="mt-3 text-sm text-foreground">{notice}</p> : null}
-          <div className="mt-4 grid max-w-[440px] gap-2">
-            <button type="button" className="rounded-xl border border-border px-3.5 py-3 text-left" onClick={() => startCycle()}>
-              <span className="block text-sm font-semibold">Color cycle</span>
-              <span className="block text-xs text-muted">{cycleTarget}</span>
-            </button>
-            {showGradient ? (
-              <button type="button" className="rounded-xl border border-border px-3.5 py-3 text-left" onClick={() => startGradient()}>
-                <span className="block text-sm font-semibold">Moving gradient</span>
-                <span className="block text-xs text-muted">Lightstrip</span>
-              </button>
+            {here ? (
+              <Button onClick={() => stopEffect()}>Stop</Button>
             ) : null}
           </div>
         </div>
-      )}
+        <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+          {selectedId ? <LightCard id={selectedId} /> : null}
+        </div>
+      </div>
+      <aside className="flex w-[210px] shrink-0 flex-col border-l border-border px-3 py-4">
+        <h2 className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">Looks</h2>
+        {lookIds.map((id) => (
+          <LookRow key={id} id={id} />
+        ))}
+        <Button variant="quiet" className="mt-1 px-2">
+          Save this look
+        </Button>
+        <p className="mt-3 text-[11px] text-muted">Applying a look stops the cycle.</p>
+      </aside>
     </section>
   );
 });

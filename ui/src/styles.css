@@ -76,14 +76,7 @@ body {
   overflow: hidden;
   border-radius: 999px;
   container-type: inline-size;
-  background: linear-gradient(
-    90deg,
-    var(--meter, #e39a45) 0%,
-    #f0c48a 25%,
-    #fff6ea 50%,
-    #f0c48a 75%,
-    var(--meter, #e39a45) 100%
-  );
+  background: linear-gradient(90deg, #7a4dff 0%, #3d6dff 46%, #3ec8c0 100%);
 }
 
 .hue-bead {
