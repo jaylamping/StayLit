@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.staylit.desktop",
   "build": {
-    "frontendDist": "../ui"
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:ui",
+    "frontendDist": "../ui/dist"
   },
   "app": {
     "withGlobalTauri": true,
@@ -12,11 +15,12 @@
       {
         "label": "main",
         "title": "StayLit",
-        "width": 460,
-        "height": 820,
-        "minWidth": 380,
-        "minHeight": 560,
-        "resizable": true
+        "width": 960,
+        "height": 600,
+        "minWidth": 800,
+        "minHeight": 520,
+        "resizable": true,
+        "visible": false
       }
     ],
     "security": {

@@ -25,8 +25,11 @@ Node has to be on `PATH`. You also need Rust and Cargo.
 
 ```sh
 npm install
+npm run dev
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
+
+`npm run dev` opens the window in a browser so the layout can be tried without a bulb on the network. The Cargo command is the tray app.
 
 ## Tests
 

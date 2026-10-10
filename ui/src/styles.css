@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: Outfit;
+  src: url("../fonts/outfit-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: Outfit;
+  src: url("../fonts/outfit-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: block;
+}
+@font-face {
+  font-family: Outfit;
+  src: url("../fonts/outfit-600.woff2") format("woff2");
+  font-weight: 600;
+  font-display: block;
+}
+
+:root {
+  --background: #f4f0ea;
+  --foreground: #1c1916;
+  --muted: #6f675e;
+  --border: rgba(28, 25, 22, 0.16);
+  --card: #fffcf8;
+  --primary: #1c1916;
+  --primary-foreground: #f4f0ea;
+  --accent: transparent;
+  --track: #e4dfd8;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #100f0d;
+  --foreground: #f3eee6;
+  --muted: #8f877c;
+  --border: rgba(243, 238, 230, 0.16);
+  --card: #1a1916;
+  --primary: #f3eee6;
+  --primary-foreground: #161412;
+  --track: #2c2926;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: Outfit, "Segoe UI", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+body {
+  min-width: 960px;
+  min-height: 600px;
+}
+
+.hue-meter {
+  position: relative;
+  height: 16px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6a301c, var(--meter, #e39a45), #f0c48a, var(--meter, #e39a45), #8a3e22);
+}
+
+.hue-bead {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--meter, #e39a45);
+  box-shadow: 0 0 0 2px #f6f1ea;
+  animation: hue-bead 8s linear infinite;
+  will-change: transform;
+}
+
+.zone-bar {
+  display: flex;
+  height: 7px;
+  gap: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.zone-bar i {
+  flex: 1;
+  border-radius: 1px;
+}
+
+.zone-bar.moving {
+  animation: zone-nudge 2.4s linear infinite;
+  will-change: transform;
+}
+
+.effect-zones {
+  height: 16px;
+  width: 200%;
+  background: linear-gradient(90deg, #3a2418, #b8743c, #f3d7b4, #6e3d2a, #3a2418, #b8743c, #f3d7b4);
+  animation: zone-slide 2.4s linear infinite;
+  will-change: transform;
+}
+
+@keyframes hue-bead {
+  from { transform: translateX(0); }
+  to { transform: translateX(444px); }
+}
+
+@keyframes zone-nudge {
+  from { transform: translateX(0); }
+  to { transform: translateX(-8px); }
+}
+
+@keyframes zone-slide {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
