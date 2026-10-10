@@ -15,6 +15,7 @@ import {
 import { clearFrames, lastFrames, paintFrame, type EffectFrame } from "@/lib/frames";
 import { lifx, onSidecarEvent, sidecarAvailable } from "@/lib/lifx";
 import { loadWindow, saveWindow } from "@/lib/remember";
+import { clampKelvin, kelvinRangeOf } from "@/lib/whites";
 
 export type Light = {
   id: string;
@@ -30,6 +31,7 @@ export type Light = {
   hue?: number;
   saturation?: number;
   zones?: string[];
+  kelvinRange?: [number, number];
   roomId: string;
 };
 
@@ -231,7 +233,7 @@ function paintLight(
   const mode = light.ability === "white" ? "white" : (patch.mode ?? light.mode);
   const hue = patch.hue ?? light.hue ?? 0;
   const saturation = patch.saturation ?? light.saturation ?? 0;
-  const kelvin = Math.min(9000, Math.max(2500, patch.kelvin ?? light.kelvin ?? 3800));
+  const kelvin = clampKelvin(patch.kelvin ?? light.kelvin ?? 3800, kelvinRangeOf(light.kelvinRange));
   const brightness = patch.brightness ?? light.brightness;
   return {
     ...light,

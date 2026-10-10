@@ -87,6 +87,19 @@ function sendZoneWrite(light, write, wait) {
   return Promise.resolve();
 }
 
+function kelvinRangeOf(features) {
+  const range = features && features.temperature_range;
+  if (!Array.isArray(range) || range.length !== 2) {
+    return null;
+  }
+  const low = Number(range[0]);
+  const high = Number(range[1]);
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high < low) {
+    return null;
+  }
+  return [low, high];
+}
+
 class LifxPlayer {
   constructor(client, store) {
     this.client = client;
@@ -133,6 +146,7 @@ class LifxPlayer {
       color: null,
       multizone: null,
       productName: null,
+      kelvinRange: null,
       zones: null,
       error: null
     };
@@ -198,6 +212,7 @@ class LifxPlayer {
         const features = hardware && hardware.productFeatures;
         snap.productName = hardware && hardware.productName ? hardware.productName : null;
         snap.multizone = Boolean(features && features.multizone);
+        snap.kelvinRange = kelvinRangeOf(features);
         if (features && features.color === false) snap.hasColor = false;
         else if (features && features.color === true) snap.hasColor = true;
       } catch (err) {
@@ -300,5 +315,6 @@ function createLifxPlayer(store) {
 module.exports = {
   LifxPlayer,
   createLifxPlayer,
+  kelvinRangeOf,
   readZones
 };

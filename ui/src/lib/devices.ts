@@ -1,4 +1,5 @@
 import { heldPower, mergeHeld, pendingEdits, type PendingEdit } from "@/lib/edits";
+import { kelvinHex } from "@/lib/whites";
 import type { Light } from "@/store";
 
 export type DeviceColor = {
@@ -17,16 +18,12 @@ export type DeviceSnap = {
   zones?: DeviceColor[] | null;
   multizone?: boolean | null;
   hasColor?: boolean | null;
+  kelvinRange?: [number, number] | null;
 };
 
 function channel(value: number) {
   const clamped = Math.max(0, Math.min(255, Math.round(value)));
   return clamped.toString(16).padStart(2, "0");
-}
-
-function kelvinHex(kelvin: number) {
-  const t = Math.min(1, Math.max(0, (kelvin - 2500) / 4500));
-  return `#${channel(255)}${channel(214 + t * 28)}${channel(170 + t * 70)}`;
 }
 
 export function lightSwatch(
@@ -92,6 +89,7 @@ function applyDevice(light: Light, device: DeviceSnap, edit: PendingEdit | undef
     brightness,
     color,
     zones: zones ?? light.zones,
+    kelvinRange: device.kelvinRange ?? light.kelvinRange,
   };
   const held = mergeHeld(light, incoming, edit, holdPaint);
   if (holdPaint) held.zones = light.zones;
@@ -105,6 +103,7 @@ function applyDevice(light: Light, device: DeviceSnap, edit: PendingEdit | undef
     held.name === light.name &&
     held.offline === light.offline &&
     held.ability === light.ability &&
+    held.kelvinRange?.join() === light.kelvinRange?.join() &&
     held.zones?.join() === light.zones?.join()
     ? light
     : { ...held, on: heldPower(light.on, discoveredOn, edit) };
@@ -136,6 +135,7 @@ export function lightsFromDevices(devices: DeviceSnap[], roomId: string): Light[
         roomId,
       };
       if (ability === "multizone" && zones?.length) light.zones = zones;
+      if (device.kelvinRange) light.kelvinRange = device.kelvinRange;
       return light;
     })
     .sort((a, b) => a.name.localeCompare(b.name));
