@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build:ui": "tsc -p tsconfig.app.json --noEmit && vite build",
-    "test": "npm test --prefix sidecar && node --experimental-strip-types --test ui/src/lib/edits.test.js ui/src/lib/whites.test.js",
+    "test": "npm test --prefix sidecar && node --experimental-strip-types --test ui/src/lib/edits.test.js ui/src/lib/whites.test.js ui/src/lib/paint.test.js",
     "build": "npm run build --prefix sidecar",
     "postinstall": "npm install --prefix sidecar"
   },

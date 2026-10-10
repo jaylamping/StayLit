@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { lightSwatch } from "@/lib/devices";
 import { lampVar, zoneVar } from "@/lib/frames";
+import { lampFor } from "@/lib/paint";
 import type { Light } from "@/store";
 
 export function wellFill(light: Light) {
@@ -48,4 +49,25 @@ export function wellStyle(light: Light, fill: string, options: { driven?: boolea
     opacity: Math.min(1, 0.3 + light.brightness * 0.0125),
     boxShadow: glow ? `0 0 ${spread}px color-mix(in srgb, ${fill} ${glow}%, transparent)` : undefined,
   };
+}
+
+export function setLamp(lights: Light[], owned: readonly string[] | null) {
+  const lamp = lampFor(
+    lights.map((light) => ({ id: light.id, fill: wellFill(light), lit: light.on && !light.offline, owned: Boolean(owned?.includes(light.id)) })),
+  );
+  if (!lamp) return null;
+  if (!lamp.ownedId) return lamp.blend;
+  const live = `var(${lampVar(lamp.ownedId)}, ${lamp.blend})`;
+  return lamp.rest ? `color-mix(in srgb, ${live} ${lamp.ownedShare}%, ${lamp.rest})` : live;
+}
+
+export function memberSwatch(light: Light, owned: boolean, accent: string): { className?: string; style: CSSProperties } {
+  if (light.offline || !light.on) return { style: { background: "var(--track)" } };
+  if (owned) {
+    return {
+      className: "fx-lamp",
+      style: { ...lampStyle(light.id, accent || wellFill(light)), background: "var(--lamp)", opacity: Math.min(1, 0.3 + light.brightness * 0.0125) },
+    };
+  }
+  return { style: { ...wellStyle(light, wellFill(light)), boxShadow: undefined } };
 }

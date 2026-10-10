@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { zoneVar } from "@/lib/frames";
 import { cn } from "@/lib/utils";
-import { lampStyle, sampleIndexes, wellFill, wellStyle } from "@/lib/well";
-import { groupCount, groupPower, isCandle, openLightId, useOffice, type Light } from "@/store";
+import { lampStyle, sampleIndexes, setLamp, wellFill, wellStyle } from "@/lib/well";
+import { groupCount, groupPower, isCandle, memberIds, openLightId, useOffice, type Light, type OfficeState, type SetTarget } from "@/store";
 
 function meta(light: Light, driven: string | null) {
   if (light.offline) return "Offline";
@@ -33,12 +33,19 @@ function foldMeta(lights: Light[], driven: string | null) {
   return `${mode} · ${level}`;
 }
 
-function headerStyle(open: boolean): CSSProperties | undefined {
+function headerStyle(open: boolean, lamp: string | null): CSSProperties | undefined {
   if (!open) return undefined;
+  if (!lamp) return { background: "color-mix(in srgb, var(--foreground) 7%, transparent)", boxShadow: "inset 2px 0 0 var(--foreground)" };
   return {
-    background: "color-mix(in srgb, var(--foreground) 7%, transparent)",
-    boxShadow: "inset 2px 0 0 var(--foreground)",
-  };
+    "--lamp": lamp,
+    background: "linear-gradient(90deg, color-mix(in srgb, var(--lamp) 18%, transparent), color-mix(in srgb, var(--lamp) 6%, transparent))",
+    boxShadow: "inset 2px 0 0 var(--lamp)",
+  } as CSSProperties;
+}
+
+function openLamp(state: OfficeState, target: SetTarget) {
+  const lights = memberIds(state, target).flatMap((id) => state.lights.find((light) => light.id === id) ?? []);
+  return setLamp(lights, state.effect && state.effect.roomId === state.roomId ? state.effect.lightIds : null);
 }
 
 function rowStyle(highlight: string | null, open: boolean): CSSProperties | undefined {
@@ -209,6 +216,7 @@ const GroupBlock = memo(function GroupBlock({ groupId }: { groupId: string }) {
   });
   const notice = useOffice((state) => (state.notice?.scope === groupId ? state.notice.message : null));
   const isOpen = useOffice((state) => state.open.kind === "group" && state.open.groupId === groupId);
+  const lamp = useOffice((state) => (state.open.kind === "group" && state.open.groupId === groupId ? openLamp(state, { kind: "group", groupId }) : null));
   const openGroup = useOffice((state) => state.openGroup);
   const setGroupPower = useOffice((state) => state.setGroupPower);
   const [power, count] = summary.split(":");
@@ -222,7 +230,7 @@ const GroupBlock = memo(function GroupBlock({ groupId }: { groupId: string }) {
   });
   return (
     <section>
-      <div className="mt-1.5 flex items-center gap-2 rounded-[8px] px-2 py-1" style={headerStyle(isOpen)}>
+      <div className={lamp ? "fx-lamp mt-1.5 flex items-center gap-2 rounded-[8px] px-2 py-1" : "mt-1.5 flex items-center gap-2 rounded-[8px] px-2 py-1"} style={headerStyle(isOpen, lamp)}>
         <button
           type="button"
           aria-pressed={isOpen}
@@ -252,6 +260,7 @@ function RoomMenu({ roomName, onOff }: { roomName: string; onOff: () => void }) 
   const names = useOffice(useShallow((state) => state.rooms.map((room) => room.name)));
   const roomId = useOffice((state) => state.roomId);
   const roomOpen = useOffice((state) => state.open.kind === "room");
+  const lamp = useOffice((state) => (state.open.kind === "room" ? openLamp(state, { kind: "room" }) : null));
   const openRoom = useOffice((state) => state.openRoom);
   const setRoom = useOffice((state) => state.setRoom);
   const hasLiving = useOffice((state) => state.rooms.some((room) => room.id === "living"));
@@ -266,8 +275,8 @@ function RoomMenu({ roomName, onOff }: { roomName: string; onOff: () => void }) 
         <button
           type="button"
           aria-pressed={roomOpen}
-          className="rounded-[8px] px-1.5 py-0.5 text-sm font-semibold tracking-[-0.01em]"
-          style={headerStyle(roomOpen)}
+          className={lamp ? "fx-lamp rounded-[8px] px-1.5 py-0.5 text-sm font-semibold tracking-[-0.01em]" : "rounded-[8px] px-1.5 py-0.5 text-sm font-semibold tracking-[-0.01em]"}
+          style={headerStyle(roomOpen, lamp)}
           onClick={() => openRoom()}
         >
           {roomName}

@@ -157,6 +157,23 @@ body {
   transition-timing-function: linear;
 }
 
+.set-wash {
+  position: relative;
+  isolation: isolate;
+}
+
+.set-wash::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -18px;
+  right: -26px;
+  left: -26px;
+  height: 240px;
+  pointer-events: none;
+  background: radial-gradient(70% 100% at 12% 0%, color-mix(in srgb, var(--lamp) var(--wash, 14%), transparent), transparent);
+}
+
 .fx-band {
   position: relative;
   overflow: hidden;

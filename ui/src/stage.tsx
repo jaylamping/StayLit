@@ -5,7 +5,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { hueHex, lightSwatch } from "@/lib/devices";
 import { lastFrame, meterBead, meterShift, meterSpan, watchLeadHue, watchLight } from "@/lib/frames";
-import { lampStyle, liveZones, wellFill, wellStyle } from "@/lib/well";
+import { lampStyle, liveZones, memberSwatch, setLamp, wellFill, wellStyle } from "@/lib/well";
 import { kelvinHex, kelvinRangeOf, whiteAt, whitesIn, type KelvinRange, type White } from "@/lib/whites";
 import {
   cycleIntervalMs,
@@ -486,6 +486,12 @@ function differs(values: number[]) {
   return first !== undefined && values.some((value) => Math.round(value) !== Math.round(first));
 }
 
+function MemberDot({ light, owned, accent }: { light: Light; owned: boolean; accent: string }) {
+  if (light.offline || !light.on) return <i className="size-2.5 shrink-0 rounded-[3px]" style={{ boxShadow: "inset 0 0 0 1px var(--border-strong)" }} />;
+  const swatch = memberSwatch(light, owned, accent);
+  return <i className={swatch.className ? `${swatch.className} size-2.5 shrink-0 rounded-[3px]` : "size-2.5 shrink-0 rounded-[3px]"} style={swatch.style} />;
+}
+
 const SetPanel = memo(function SetPanel({ target }: { target: SetTarget }) {
   const members = useOffice(useShallow((state) => memberIds(state, target).flatMap((id) => state.lights.find((light) => light.id === id) ?? [])));
   const roomId = useOffice((state) => state.roomId);
@@ -536,28 +542,19 @@ const SetPanel = memo(function SetPanel({ target }: { target: SetTarget }) {
         : mode === "white"
           ? `${kelvin}K · ${brightness}%`
           : `Color · ${brightness}%`;
+  const lamp = setLamp(reachable, owned);
+  const ownedBy = (light: Light) => Boolean(owned?.includes(light.id) && light.on);
   return (
-    <div className={lit ? "fx-lamp" : undefined} style={lit ? lampStyle(lead.id, accent || wellFill(lead)) : undefined}>
+    <div className="set-wash fx-lamp" style={{ "--lamp": lamp ?? "var(--track)", "--wash": lamp ? "14%" : "0%" } as CSSProperties}>
       <div className="mb-3 flex items-center gap-3">
         <span
           className="flex size-11 shrink-0 gap-[2px] overflow-hidden rounded-[12px]"
-          style={onCount ? { boxShadow: `0 0 18px color-mix(in srgb, ${lit ? "var(--lamp)" : wellFill(lead)} 25%, transparent)` } : undefined}
+          style={lamp ? { boxShadow: "0 0 18px color-mix(in srgb, var(--lamp) 28%, transparent)" } : undefined}
           aria-hidden
         >
           {members.slice(0, 8).map((light) => {
-            const live = Boolean(lit && light.on);
-            const fill = live ? "var(--lamp)" : wellFill(light);
-            return (
-              <i
-                key={light.id}
-                className={live ? "fx-lamp flex-1" : "flex-1"}
-                style={
-                  light.on && !light.offline
-                    ? { ...(live ? lampStyle(light.id, accent || wellFill(light)) : null), ...wellStyle(light, fill, { driven: live }), boxShadow: undefined }
-                    : { background: "var(--track)" }
-                }
-              />
-            );
+            const swatch = memberSwatch(light, ownedBy(light), accent);
+            return <i key={light.id} className={swatch.className ? `${swatch.className} flex-1` : "flex-1"} style={swatch.style} />;
           })}
         </span>
         <div className="min-w-0 flex-1">
@@ -578,10 +575,7 @@ const SetPanel = memo(function SetPanel({ target }: { target: SetTarget }) {
             className="inline-flex h-6 max-w-40 items-center gap-1.5 rounded-full border border-border px-2 text-[11.5px] font-medium text-muted"
             onClick={() => selectLight(light.id)}
           >
-            <i
-              className="size-2.5 shrink-0 rounded-[3px]"
-              style={light.on && !light.offline ? { background: wellFill(light) } : { boxShadow: "inset 0 0 0 1px var(--border-strong)" }}
-            />
+            <MemberDot light={light} owned={ownedBy(light)} accent={accent} />
             <span className="truncate">{light.name}</span>
           </button>
         ))}

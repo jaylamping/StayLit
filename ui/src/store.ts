@@ -15,7 +15,7 @@ import {
 import { clearFrames, lastFrames, paintFrame, type EffectFrame } from "@/lib/frames";
 import { lifx, onSidecarEvent, sidecarAvailable } from "@/lib/lifx";
 import { loadWindow, saveWindow } from "@/lib/remember";
-import { clampKelvin, kelvinRangeOf } from "@/lib/whites";
+import { nextPaint, type PaintPatch } from "@/lib/paint";
 
 export type Light = {
   id: string;
@@ -49,7 +49,7 @@ export type Look = {
 export type ThemeMode = "system" | "light" | "dark";
 export type Open = { kind: "none" } | { kind: "room" } | { kind: "group"; groupId: string } | { kind: "light"; lightId: string };
 export type SetTarget = { kind: "room" } | { kind: "group"; groupId: string };
-export type PaintPatch = { mode?: "color" | "white"; hue?: number; saturation?: number; kelvin?: number; brightness?: number };
+export type { PaintPatch };
 export type Effect = {
   name: string;
   target: string;
@@ -94,7 +94,7 @@ function placeLights(lights: Light[], rooms: Room[], groups: Group[], ids: Reado
 
 const looks: Look[] = [];
 
-type OfficeState = {
+export type OfficeState = {
   lights: Light[];
   rooms: Room[];
   groups: Group[];
@@ -235,11 +235,7 @@ function fieldsOf(light: Light) {
 }
 
 function paintLight(light: Light, patch: PaintPatch): Light {
-  const mode = light.ability === "white" ? "white" : (patch.mode ?? light.mode);
-  const hue = patch.hue ?? light.hue ?? 0;
-  const saturation = patch.saturation ?? light.saturation ?? 0;
-  const kelvin = clampKelvin(patch.kelvin ?? light.kelvin ?? 3800, kelvinRangeOf(light.kelvinRange));
-  const brightness = patch.brightness ?? light.brightness;
+  const { mode, hue, saturation, kelvin, brightness } = nextPaint(light, patch);
   const color = lightSwatch({ mode, hue, saturation, kelvin }, light.color);
   return {
     ...light,
