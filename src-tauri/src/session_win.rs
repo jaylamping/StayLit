@@ -22,7 +22,7 @@ pub fn install(app: &tauri::AppHandle) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|err| err.to_string())?;
     unsafe {
         let installed = SetWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID, 0);
-        if installed == 0 {
+        if installed == false {
             return Err("SetWindowSubclass failed".to_string());
         }
     }
