@@ -2,11 +2,22 @@ import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { hueHex } from "@/lib/devices";
+import { Switch } from "@/components/ui/switch";
+import { hueHex, lightSwatch } from "@/lib/devices";
 import { lastFrame, meterBead, meterShift, meterSpan, watchLeadHue, watchLight } from "@/lib/frames";
 import { lampStyle, liveZones, wellFill, wellStyle } from "@/lib/well";
-import { kelvinHex, kelvinRangeOf, whiteAt, whitesIn } from "@/lib/whites";
-import { cycleIntervalMs, cycleSelection, useOffice, type Light } from "@/store";
+import { kelvinHex, kelvinRangeOf, whiteAt, whitesIn, type KelvinRange, type White } from "@/lib/whites";
+import {
+  cycleIntervalMs,
+  cycleSelection,
+  gradientStrip,
+  groupPower,
+  memberIds,
+  useOffice,
+  type Light,
+  type PaintPatch,
+  type SetTarget,
+} from "@/store";
 
 const hueNames: [number, string][] = [
   [0, "Red"],
@@ -128,14 +139,12 @@ const EffectBand = memo(function EffectBand() {
   const lookAccent = useOffice((state) => {
     const look = state.looks.find((item) => item.id === state.selectedLookId && item.roomId === state.roomId);
     if (!look) return null;
-    const page = state.page;
-    if (page.kind === "group" && !look.groupIds.includes(page.groupId)) return null;
+    const open = state.open;
+    if (open.kind === "group" && !look.groupIds.includes(open.groupId)) return null;
     return look.accent;
   });
   const cycleTarget = useOffice((state) => cycleSelection(state).target);
-  const strip = useOffice((state) =>
-    state.lights.find((light) => light.roomId === state.roomId && light.ability === "multizone" && light.live && !light.offline)?.name ?? null,
-  );
+  const strip = useOffice((state) => gradientStrip(state)?.name ?? null);
   const setRoom = useOffice((state) => state.setRoom);
   const startCycle = useOffice((state) => state.startCycle);
   const startGradient = useOffice((state) => state.startGradient);
@@ -195,14 +204,13 @@ const EffectBand = memo(function EffectBand() {
   );
 });
 
-function WhiteTiles({ light }: { light: Light }) {
-  const setLightPaint = useOffice((state) => state.setLightPaint);
-  const list = whitesIn(kelvinRangeOf(light.kelvinRange));
-  const current = whiteAt(light.kelvin, list);
+function WhiteTiles({ whites, kelvin, onPick }: { whites: White[]; kelvin: number | undefined; onPick: (kelvin: number) => void }) {
+  const current = whiteAt(kelvin, whites);
+  if (whites.length === 0) return <p className="mt-1 text-xs text-dim">These lights share no white.</p>;
   return (
     <div className="mt-1">
       <div role="radiogroup" aria-label="White" className="grid grid-cols-[repeat(auto-fill,minmax(80px,1fr))] gap-[5px]">
-        {list.map((white) => {
+        {whites.map((white) => {
           const on = current?.kelvin === white.kelvin;
           return (
             <button
@@ -216,7 +224,7 @@ function WhiteTiles({ light }: { light: Light }) {
                 background: kelvinHex(white.kelvin),
                 boxShadow: on ? "0 0 0 2px var(--background), 0 0 0 3.5px var(--foreground)" : undefined,
               }}
-              onClick={() => setLightPaint(light.id, { mode: "white", kelvin: white.kelvin })}
+              onClick={() => onPick(white.kelvin)}
             >
               <span className="text-[10.5px] leading-[1.1] font-medium tracking-[-0.01em]">{white.name}</span>
               <span className="self-end text-[10px] leading-none tabular-nums opacity-65">{white.kelvin}K</span>
@@ -228,31 +236,74 @@ function WhiteTiles({ light }: { light: Light }) {
   );
 }
 
-type Framed = { hue: number; saturation: number; brightness: number; jump: boolean };
+function ModeSwitch({ mode, canColor, onPick }: { mode: "color" | "white" | "mixed"; canColor: boolean; onPick: (mode: "color" | "white") => void }) {
+  const segment = (value: "color" | "white", label: string) => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={mode === value}
+      className={mode === value ? "rounded-[7px] bg-seg-on px-3 py-[5px] text-xs font-medium" : "rounded-[7px] px-3 py-[5px] text-xs font-medium text-muted"}
+      onClick={() => onPick(value)}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div role="radiogroup" aria-label="Mode" className="flex shrink-0 rounded-[9px] border border-border bg-seg p-0.5">
+      {canColor ? segment("color", "Color") : null}
+      {segment("white", "White")}
+    </div>
+  );
+}
 
-const PaintSliders = memo(function PaintSliders({ light, live }: { light: Light; live: boolean }) {
-  const setLightPaint = useOffice((state) => state.setLightPaint);
+type Framed = { hue: number; saturation: number; brightness: number; jump: boolean };
+type PaintValues = { hue: number; saturation: number; brightness: number; kelvin: number | undefined };
+type Mixed = Partial<Record<"hue" | "saturation" | "brightness", boolean>>;
+
+function PaintControls({
+  frameId,
+  live,
+  mode,
+  values,
+  mixed = {},
+  color,
+  whites,
+  onPaint,
+}: {
+  frameId: string;
+  live: boolean;
+  mode: "color" | "white" | "mixed";
+  values: PaintValues;
+  mixed?: Mixed;
+  color: string;
+  whites: White[];
+  onPaint: (patch: PaintPatch) => void;
+}) {
   const frame = useRef(0);
-  const queued = useRef<{ hue?: number; saturation?: number; brightness?: number } | null>(null);
+  const queued = useRef<PaintPatch | null>(null);
+  const paint = useRef(onPaint);
+  useEffect(() => {
+    paint.current = onPaint;
+  });
   const [draft, setDraft] = useState<{ hue?: number; saturation?: number; brightness?: number }>({});
   const [framed, setFramed] = useState<Framed | null>(null);
   useEffect(() => {
     setDraft((current) => {
       const next = { ...current };
-      if (next.hue === light.hue) delete next.hue;
-      if (next.saturation === light.saturation) delete next.saturation;
-      if (next.brightness === light.brightness) delete next.brightness;
+      if (next.hue === values.hue && !mixed.hue) delete next.hue;
+      if (next.saturation === values.saturation && !mixed.saturation) delete next.saturation;
+      if (next.brightness === values.brightness && !mixed.brightness) delete next.brightness;
       return next;
     });
-  }, [light.hue, light.saturation, light.brightness]);
+  }, [values.hue, values.saturation, values.brightness, mixed.hue, mixed.saturation, mixed.brightness]);
   useEffect(() => {
     if (!live) {
       setFramed(null);
       return;
     }
-    const seed = lastFrame(light.id);
+    const seed = lastFrame(frameId);
     setFramed(seed ? { hue: seed.hue, saturation: seed.saturation, brightness: seed.brightness, jump: true } : null);
-    return watchLight(light.id, (next) =>
+    return watchLight(frameId, (next) =>
       setFramed((current) => ({
         hue: next.hue,
         saturation: next.saturation,
@@ -260,7 +311,7 @@ const PaintSliders = memo(function PaintSliders({ light, live }: { light: Light;
         jump: !current || Math.abs(next.hue - current.hue) > 180,
       })),
     );
-  }, [live, light.id]);
+  }, [live, frameId]);
   function queue(patch: { hue?: number; saturation?: number; brightness?: number }) {
     queued.current = { ...queued.current, ...patch };
     setDraft((current) => ({ ...current, ...patch }));
@@ -269,53 +320,54 @@ const PaintSliders = memo(function PaintSliders({ light, live }: { light: Light;
       frame.current = 0;
       const next = queued.current;
       queued.current = null;
-      if (next) setLightPaint(light.id, next);
+      if (next) paint.current(next);
     });
   }
   const shown = live ? framed : null;
   const easing = Boolean(shown && !shown.jump);
-  const color = live ? "var(--lamp)" : light.color;
-  const hue = shown?.hue ?? draft.hue ?? light.hue ?? 0;
-  const saturation = shown?.saturation ?? draft.saturation ?? light.saturation ?? 0;
-  const brightness = shown?.brightness ?? draft.brightness ?? light.brightness;
+  const thumb = live ? "var(--lamp)" : color;
+  const hue = shown?.hue ?? draft.hue ?? values.hue;
+  const saturation = shown?.saturation ?? draft.saturation ?? values.saturation;
+  const brightness = shown?.brightness ?? draft.brightness ?? values.brightness;
+  const label = (key: "hue" | "saturation" | "brightness", text: string) => (!shown && draft[key] === undefined && mixed[key] ? "Mixed" : text);
   return (
     <div>
-      {light.mode === "white" ? (
-        <WhiteTiles light={light} />
-      ) : (
+      {mode === "white" ? <WhiteTiles whites={whites} kelvin={values.kelvin} onPick={(kelvin) => onPaint({ mode: "white", kelvin })} /> : null}
+      {mode === "mixed" ? <p className="mt-1 text-xs text-dim">Some are in color and some in white. Pick Color or White to set them together.</p> : null}
+      {mode === "color" ? (
         <>
           <Slider
             label="Hue"
             value={hue}
             min={0}
             max={360}
-            color={color}
+            color={thumb}
             track={hueTrack}
             live={easing}
-            display={`${Math.round(hue)}`}
+            display={label("hue", `${Math.round(hue)}`)}
             onValueChange={(value) => queue({ hue: value })}
           />
           <Slider
             label="Saturation"
             value={saturation}
-            color={color}
+            color={thumb}
             live={easing}
-            display={`${Math.round(saturation)}%`}
+            display={label("saturation", `${Math.round(saturation)}%`)}
             onValueChange={(value) => queue({ saturation: value })}
           />
         </>
-      )}
+      ) : null}
       <Slider
         label="Brightness"
         value={brightness}
-        color={color}
+        color={thumb}
         live={easing}
-        display={`${Math.round(brightness)}%`}
+        display={label("brightness", `${Math.round(brightness)}%`)}
         onValueChange={(value) => queue({ brightness: value })}
       />
     </div>
   );
-});
+}
 
 function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: string }) {
   return (
@@ -355,7 +407,6 @@ const LightPanel = memo(function LightPanel({ id }: { id: string }) {
   const assignGroup = useOffice((state) => state.assignGroup);
   const [moving, setMoving] = useState(false);
   if (!light) return null;
-  const white = light.mode === "white";
   const groupName = groupNames[groupIds.indexOf(groupId ?? "")] ?? null;
   const lit = Boolean(driven && light.on);
   const fill = lit ? "var(--lamp)" : wellFill(light);
@@ -371,30 +422,17 @@ const LightPanel = memo(function LightPanel({ id }: { id: string }) {
           <p className="truncate text-xs text-muted tabular-nums">{[groupName, lightMeta(light, driven)].filter(Boolean).join(" · ")}</p>
           {notice ? <p className="mt-1 text-xs text-foreground">{notice}</p> : null}
         </div>
-        <div role="radiogroup" aria-label="Mode" className="flex shrink-0 rounded-[9px] border border-border bg-seg p-0.5">
-          {light.ability === "white" ? null : (
-            <button
-              type="button"
-              role="radio"
-              aria-checked={!white}
-              className={white ? "rounded-[7px] px-3 py-[5px] text-xs font-medium text-muted" : "rounded-[7px] bg-seg-on px-3 py-[5px] text-xs font-medium"}
-              onClick={() => setLightPaint(light.id, { mode: "color" })}
-            >
-              Color
-            </button>
-          )}
-          <button
-            type="button"
-            role="radio"
-            aria-checked={white}
-            className={white ? "rounded-[7px] bg-seg-on px-3 py-[5px] text-xs font-medium" : "rounded-[7px] px-3 py-[5px] text-xs font-medium text-muted"}
-            onClick={() => setLightPaint(light.id, { mode: "white" })}
-          >
-            White
-          </button>
-        </div>
+        <ModeSwitch mode={light.mode} canColor={light.ability !== "white"} onPick={(mode) => setLightPaint(light.id, { mode })} />
       </div>
-      <PaintSliders light={light} live={lit} />
+      <PaintControls
+        frameId={light.id}
+        live={lit}
+        mode={light.mode}
+        values={{ hue: light.hue ?? 0, saturation: light.saturation ?? 0, brightness: light.brightness, kelvin: light.kelvin }}
+        color={light.color}
+        whites={whitesIn(kelvinRangeOf(light.kelvinRange))}
+        onPaint={(patch) => setLightPaint(light.id, patch)}
+      />
       <div className="mt-[18px] flex items-center gap-3.5">
         <span className="text-xs font-medium text-muted">Group</span>
         <span className="inline-flex h-6 items-center rounded-full border border-border-strong px-[11px] text-xs font-medium">{groupName ?? "None"}</span>
@@ -431,20 +469,151 @@ const LightPanel = memo(function LightPanel({ id }: { id: string }) {
   );
 });
 
+function sharedRange(lights: Light[]): KelvinRange | null {
+  if (lights.length === 0) return null;
+  let low = 0;
+  let high = Number.POSITIVE_INFINITY;
+  for (const light of lights) {
+    const [min, max] = kelvinRangeOf(light.kelvinRange);
+    low = Math.max(low, min);
+    high = Math.min(high, max);
+  }
+  return low <= high ? [low, high] : null;
+}
+
+function differs(values: number[]) {
+  const [first] = values;
+  return first !== undefined && values.some((value) => Math.round(value) !== Math.round(first));
+}
+
+const SetPanel = memo(function SetPanel({ target }: { target: SetTarget }) {
+  const members = useOffice(useShallow((state) => memberIds(state, target).flatMap((id) => state.lights.find((light) => light.id === id) ?? [])));
+  const roomId = useOffice((state) => state.roomId);
+  const name = useOffice((state) =>
+    target.kind === "room"
+      ? (state.rooms.find((room) => room.id === state.roomId)?.name ?? "Room")
+      : (state.groups.find((group) => group.id === target.groupId)?.name ?? "Group"),
+  );
+  const scope = target.kind === "room" ? roomId : target.groupId;
+  const notice = useOffice((state) => (state.notice?.scope === scope ? state.notice.message : null));
+  const owned = useOffice((state) => (state.effect && state.effect.roomId === state.roomId ? state.effect.lightIds : null));
+  const effectName = useOffice((state) => state.effect?.name ?? null);
+  const accent = useOffice((state) => state.effect?.accent ?? "");
+  const setSetPaint = useOffice((state) => state.setSetPaint);
+  const setSetPower = useOffice((state) => state.setSetPower);
+  const selectLight = useOffice((state) => state.selectLight);
+  const reachable = members.filter((light) => !light.offline);
+  const lead = reachable[0];
+  if (!lead) {
+    return <p className="text-xs text-dim">{members.length ? `${name} is offline.` : `${name} has no lights yet.`}</p>;
+  }
+  const onCount = reachable.filter((light) => light.on).length;
+  const lit = Boolean(owned && onCount > 0 && reachable.every((light) => owned.includes(light.id)));
+  const canColor = reachable.every((light) => light.ability !== "white");
+  const mode = reachable.every((light) => light.mode === "white") ? "white" : reachable.every((light) => light.mode === "color") ? "color" : "mixed";
+  const colored = reachable.filter((light) => light.mode === "color");
+  const base = colored[0] ?? lead;
+  const levels = reachable.map((light) => light.brightness);
+  const brightness = Math.round(levels.reduce((sum, level) => sum + level, 0) / levels.length);
+  const kelvins = reachable.map((light) => light.kelvin ?? 3800);
+  const kelvin = mode === "white" && !kelvins.some((value) => Math.abs(value - (kelvins[0] ?? 0)) > 50) ? kelvins[0] : undefined;
+  const range = sharedRange(reachable);
+  const values = { hue: base.hue ?? 0, saturation: base.saturation ?? 0, brightness, kelvin };
+  const mixed = {
+    hue: differs(colored.map((light) => light.hue ?? 0)),
+    saturation: differs(colored.map((light) => light.saturation ?? 0)),
+    brightness: differs(levels),
+  };
+  const color =
+    mode === "color" ? lightSwatch({ mode: "color", hue: values.hue, saturation: values.saturation }) : mode === "white" ? kelvinHex(kelvin ?? lead.kelvin ?? 3800) : kelvinHex(4000);
+  const power = groupPower(reachable, reachable.map((light) => light.id));
+  const summary = lit
+    ? `${effectName} · ${brightness}%`
+    : onCount === 0
+      ? "Off"
+      : mode === "mixed" || mixed.brightness || (mode === "white" && kelvin === undefined) || (mode === "color" && (mixed.hue || mixed.saturation))
+        ? "Mixed"
+        : mode === "white"
+          ? `${kelvin}K · ${brightness}%`
+          : `Color · ${brightness}%`;
+  return (
+    <div className={lit ? "fx-lamp" : undefined} style={lit ? lampStyle(lead.id, accent || wellFill(lead)) : undefined}>
+      <div className="mb-3 flex items-center gap-3">
+        <span
+          className="flex size-11 shrink-0 gap-[2px] overflow-hidden rounded-[12px]"
+          style={onCount ? { boxShadow: `0 0 18px color-mix(in srgb, ${lit ? "var(--lamp)" : wellFill(lead)} 25%, transparent)` } : undefined}
+          aria-hidden
+        >
+          {members.slice(0, 8).map((light) => {
+            const live = Boolean(lit && light.on);
+            const fill = live ? "var(--lamp)" : wellFill(light);
+            return (
+              <i
+                key={light.id}
+                className={live ? "fx-lamp flex-1" : "flex-1"}
+                style={
+                  light.on && !light.offline
+                    ? { ...(live ? lampStyle(light.id, accent || wellFill(light)) : null), ...wellStyle(light, fill, { driven: live }), boxShadow: undefined }
+                    : { background: "var(--track)" }
+                }
+              />
+            );
+          })}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-base font-semibold tracking-[-0.01em]">{name}</div>
+          <p className="truncate text-xs text-muted tabular-nums">
+            {reachable.length === 1 ? "1 light" : `${reachable.length} lights`} · {summary}
+          </p>
+        </div>
+        <ModeSwitch mode={mode} canColor={canColor} onPick={(next) => setSetPaint(target, { mode: next })} />
+        <Switch label={`${name} power`} checked={power === "on"} mixed={power === "mixed"} group onCheckedChange={(on) => setSetPower(target, on)} />
+      </div>
+      {notice ? <p className="-mt-1.5 mb-2 text-xs text-foreground">{notice}</p> : null}
+      <div className="mb-2.5 flex flex-wrap gap-1">
+        {members.map((light) => (
+          <button
+            key={light.id}
+            type="button"
+            className="inline-flex h-6 max-w-40 items-center gap-1.5 rounded-full border border-border px-2 text-[11.5px] font-medium text-muted"
+            onClick={() => selectLight(light.id)}
+          >
+            <i
+              className="size-2.5 shrink-0 rounded-[3px]"
+              style={light.on && !light.offline ? { background: wellFill(light) } : { boxShadow: "inset 0 0 0 1px var(--border-strong)" }}
+            />
+            <span className="truncate">{light.name}</span>
+          </button>
+        ))}
+      </div>
+      <PaintControls
+        frameId={lead.id}
+        live={lit}
+        mode={mode}
+        values={values}
+        mixed={mixed}
+        color={color}
+        whites={range ? whitesIn(range) : []}
+        onPaint={(patch) => setSetPaint(target, patch)}
+      />
+    </div>
+  );
+});
+
 const LookRow = memo(function LookRow({ id }: { id: string }) {
   const look = useOffice((state) => state.looks.find((item) => item.id === id));
   const active = useOffice((state) => {
     const item = state.looks.find((entry) => entry.id === id);
     if (state.selectedLookId !== id || !item) return false;
-    const page = state.page;
-    if (page.kind === "group" && !item.groupIds.includes(page.groupId)) return false;
+    const open = state.open;
+    if (open.kind === "group" && !item.groupIds.includes(open.groupId)) return false;
     return true;
   });
   const notice = useOffice((state) => (state.notice?.scope === `look:${id}` ? state.notice.message : null));
   const label = useOffice((state) => {
     const item = state.looks.find((entry) => entry.id === id);
-    const page = state.page;
-    if (page.kind === "group") return state.groups.find((group) => group.id === page.groupId)?.name ?? "";
+    const open = state.open;
+    if (open.kind === "group") return state.groups.find((group) => group.id === open.groupId)?.name ?? "";
     return (item?.groupIds ?? []).map((groupId) => state.groups.find((group) => group.id === groupId)?.name ?? groupId).join(", ");
   });
   const selectLook = useOffice((state) => state.selectLook);
@@ -492,13 +661,16 @@ const Looks = memo(function Looks() {
 });
 
 export const Stage = memo(function Stage() {
-  const selectedId = useOffice((state) => state.selectedLightId);
+  const open = useOffice((state) => state.open);
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       <EffectBand />
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_clamp(180px,24vw,230px)]">
         <div className="min-h-0 overflow-auto px-[26px] py-[18px]">
-          {selectedId ? <LightPanel id={selectedId} /> : <p className="text-xs text-dim">Pick a light to set its color and brightness.</p>}
+          {open.kind === "light" ? <LightPanel key={open.lightId} id={open.lightId} /> : null}
+          {open.kind === "room" ? <SetPanel key="room" target={{ kind: "room" }} /> : null}
+          {open.kind === "group" ? <SetPanel key={open.groupId} target={{ kind: "group", groupId: open.groupId }} /> : null}
+          {open.kind === "none" ? <p className="text-xs text-dim">Pick a light, a group, or the room to set its color and brightness.</p> : null}
         </div>
         <Looks />
       </div>

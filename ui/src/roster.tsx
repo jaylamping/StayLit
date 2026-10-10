@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { zoneVar } from "@/lib/frames";
 import { cn } from "@/lib/utils";
 import { lampStyle, sampleIndexes, wellFill, wellStyle } from "@/lib/well";
-import { groupCount, groupPower, isCandle, useOffice, type Light } from "@/store";
+import { groupCount, groupPower, isCandle, openLightId, useOffice, type Light } from "@/store";
 
 function meta(light: Light, driven: string | null) {
   if (light.offline) return "Offline";
@@ -33,6 +33,14 @@ function foldMeta(lights: Light[], driven: string | null) {
   return `${mode} · ${level}`;
 }
 
+function headerStyle(open: boolean): CSSProperties | undefined {
+  if (!open) return undefined;
+  return {
+    background: "color-mix(in srgb, var(--foreground) 7%, transparent)",
+    boxShadow: "inset 2px 0 0 var(--foreground)",
+  };
+}
+
 function rowStyle(highlight: string | null, open: boolean): CSSProperties | undefined {
   if (highlight) {
     return {
@@ -45,7 +53,7 @@ function rowStyle(highlight: string | null, open: boolean): CSSProperties | unde
 
 const LightRow = memo(function LightRow({ id, sub = false }: { id: string; sub?: boolean }) {
   const light = useOffice((state) => state.lights.find((item) => item.id === id));
-  const selected = useOffice((state) => state.selectedLightId === id);
+  const selected = useOffice((state) => openLightId(state) === id);
   const notice = useOffice((state) => (state.notice?.scope === id ? state.notice.message : null));
   const driven = useOffice((state) =>
     state.effect && state.effect.roomId === state.roomId && state.effect.lightIds.includes(id) ? state.effect.name : null,
@@ -113,7 +121,7 @@ const LightRow = memo(function LightRow({ id, sub = false }: { id: string; sub?:
 const CandleFold = memo(function CandleFold({ ids }: { ids: string[] }) {
   const [open, setOpen] = useState(false);
   const lights = useOffice(useShallow((state) => ids.flatMap((id) => state.lights.find((light) => light.id === id) ?? [])));
-  const selected = useOffice((state) => ids.includes(state.selectedLightId ?? ""));
+  const selected = useOffice((state) => ids.includes(openLightId(state) ?? ""));
   const driven = useOffice((state) =>
     state.effect && state.effect.roomId === state.roomId && ids.some((id) => state.effect?.lightIds.includes(id)) ? state.effect.name : null,
   );
@@ -200,6 +208,7 @@ const GroupBlock = memo(function GroupBlock({ groupId }: { groupId: string }) {
     return `${groupPower(state.lights, ids)}:${groupCount(state.lights, ids)}`;
   });
   const notice = useOffice((state) => (state.notice?.scope === groupId ? state.notice.message : null));
+  const isOpen = useOffice((state) => state.open.kind === "group" && state.open.groupId === groupId);
   const openGroup = useOffice((state) => state.openGroup);
   const setGroupPower = useOffice((state) => state.setGroupPower);
   const [power, count] = summary.split(":");
@@ -213,15 +222,21 @@ const GroupBlock = memo(function GroupBlock({ groupId }: { groupId: string }) {
   });
   return (
     <section>
-      <div className="flex items-center gap-2 px-2 pt-2.5 pb-1">
-        <button type="button" className="text-[10.5px] font-semibold tracking-[0.1em] text-muted uppercase" onClick={() => openGroup(groupId)}>
-          {name}
+      <div className="mt-1.5 flex items-center gap-2 rounded-[8px] px-2 py-1" style={headerStyle(isOpen)}>
+        <button
+          type="button"
+          aria-pressed={isOpen}
+          className="flex min-w-0 flex-1 items-center gap-2 self-stretch text-left"
+          onClick={() => openGroup(groupId)}
+        >
+          <span className={isOpen ? "text-[10.5px] font-semibold tracking-[0.1em] text-foreground uppercase" : "text-[10.5px] font-semibold tracking-[0.1em] text-muted uppercase"}>
+            {name}
+          </span>
+          <span className="text-[11px] text-dim tabular-nums">
+            {lightIds.length === 0 ? "Empty" : reachable <= 1 ? (on > 0 ? "On" : "Off") : `${on} of ${reachable}`}
+          </span>
+          {notice ? <span className="ml-auto max-w-28 truncate text-[11px] text-foreground">{notice}</span> : null}
         </button>
-        <span className="text-[11px] text-dim tabular-nums">
-          {lightIds.length === 0 ? "Empty" : reachable <= 1 ? (on > 0 ? "On" : "Off") : `${on} of ${reachable}`}
-        </span>
-        <div className="flex-1" />
-        {notice ? <span className="max-w-28 truncate text-[11px] text-foreground">{notice}</span> : null}
         {lightIds.length ? (
           <Switch label={`${name} power`} checked={power === "on"} mixed={power === "mixed"} group onCheckedChange={(next) => setGroupPower(groupId, next)} />
         ) : null}
@@ -236,11 +251,8 @@ function RoomMenu({ roomName, onOff }: { roomName: string; onOff: () => void }) 
   const roomIds = useOffice(useShallow((state) => state.rooms.map((room) => room.id)));
   const names = useOffice(useShallow((state) => state.rooms.map((room) => room.name)));
   const roomId = useOffice((state) => state.roomId);
-  const groupLabel = useOffice((state) => {
-    const page = state.page;
-    if (page.kind !== "group") return null;
-    return state.groups.find((group) => group.id === page.groupId)?.name ?? null;
-  });
+  const roomOpen = useOffice((state) => state.open.kind === "room");
+  const openRoom = useOffice((state) => state.openRoom);
   const setRoom = useOffice((state) => state.setRoom);
   const hasLiving = useOffice((state) => state.rooms.some((room) => room.id === "living"));
   const addLivingRoom = useOffice((state) => state.addLivingRoom);
@@ -250,17 +262,27 @@ function RoomMenu({ roomName, onOff }: { roomName: string; onOff: () => void }) 
   };
   return (
     <div className="relative flex items-center justify-between px-1.5 pb-2.5">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="inline-flex items-center gap-1.5 text-sm font-semibold tracking-[-0.01em]"
-        onClick={() => setOpen((value) => !value)}
-      >
-        {roomName}
-        {groupLabel ? <span className="font-medium text-muted">· {groupLabel}</span> : null}
-        <ChevronDown className="size-3 text-muted" strokeWidth={1.8} />
-      </button>
+      <div className="-ml-1.5 flex items-center">
+        <button
+          type="button"
+          aria-pressed={roomOpen}
+          className="rounded-[8px] px-1.5 py-0.5 text-sm font-semibold tracking-[-0.01em]"
+          style={headerStyle(roomOpen)}
+          onClick={() => openRoom()}
+        >
+          {roomName}
+        </button>
+        <button
+          type="button"
+          aria-label="Rooms"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className="grid size-6 place-items-center rounded-[6px] text-muted"
+          onClick={() => setOpen((value) => !value)}
+        >
+          <ChevronDown className="size-3" strokeWidth={1.8} />
+        </button>
+      </div>
       <Button variant="ghost" onClick={onOff}>
         {roomName} off
       </Button>
@@ -311,22 +333,12 @@ function Loose({ ids }: { ids: string[] }) {
 export const Roster = memo(function Roster() {
   const roomId = useOffice((state) => state.roomId);
   const roomName = useOffice((state) => state.rooms.find((room) => room.id === roomId)?.name ?? "Office");
-  const pageKind = useOffice((state) => state.page.kind);
-  const groupIds = useOffice(
-    useShallow((state) => {
-      const room = state.rooms.find((item) => item.id === state.roomId);
-      if (!room) return [];
-      const page = state.page;
-      if (page.kind === "group" && room.groupIds.includes(page.groupId)) return [page.groupId];
-      return room.groupIds;
-    }),
-  );
+  const groupIds = useOffice(useShallow((state) => state.rooms.find((item) => item.id === state.roomId)?.groupIds ?? []));
   const notice = useOffice((state) => (state.notice?.scope === roomId ? state.notice.message : null));
   const roomCount = useOffice((state) => state.lights.filter((light) => light.roomId === state.roomId).length);
   const anyLights = useOffice((state) => state.lights.length > 0);
   const looseIds = useOffice(
     useShallow((state) => {
-      if (state.page.kind === "group") return [];
       const room = state.rooms.find((item) => item.id === state.roomId);
       const taken = new Set(
         state.groups.filter((group) => room?.groupIds.includes(group.id)).flatMap((group) => group.lightIds),
@@ -334,7 +346,6 @@ export const Roster = memo(function Roster() {
       return state.lights.filter((light) => light.roomId === state.roomId && !taken.has(light.id)).map((light) => light.id);
     }),
   );
-  const openRoom = useOffice((state) => state.openRoom);
   const roomOff = useOffice((state) => state.roomOff);
   return (
     <aside className="flex w-[min(318px,34vw)] shrink-0 flex-col border-r border-border bg-panel px-2.5 py-3">
@@ -347,11 +358,6 @@ export const Roster = memo(function Roster() {
         {groupIds.map((id) => (
           <GroupBlock key={id} groupId={id} />
         ))}
-        {pageKind === "group" ? (
-          <Button variant="quiet" className="mt-3 px-2" onClick={() => openRoom()}>
-            All of {roomName}
-          </Button>
-        ) : null}
       </div>
       <Loose ids={looseIds} />
     </aside>

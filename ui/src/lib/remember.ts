@@ -1,10 +1,10 @@
-import type { Group, Light, Page, Room, ThemeMode } from "@/store";
+import type { Group, Light, Open, Room, ThemeMode } from "@/store";
 
 const KEY = "staylit-window";
 
 export type SavedWindow = {
   roomId: string;
-  page: Page;
+  open?: Open;
   lookByRoom: Record<string, string | null>;
   theme: ThemeMode;
   lights: Light[];
@@ -38,6 +38,16 @@ function groupsOf(value: unknown): Group[] | undefined {
   return groups.length ? groups : undefined;
 }
 
+function openOf(value: unknown, legacyPage: unknown): Open | undefined {
+  const open = value as Partial<{ kind: string; groupId: unknown; lightId: unknown }> | undefined;
+  if (open?.kind === "room" || open?.kind === "none") return { kind: open.kind };
+  if (open?.kind === "group" && typeof open.groupId === "string") return { kind: "group", groupId: open.groupId };
+  if (open?.kind === "light" && typeof open.lightId === "string") return { kind: "light", lightId: open.lightId };
+  const page = legacyPage as Partial<{ kind: string; groupId: unknown }> | undefined;
+  if (page?.kind === "group" && typeof page.groupId === "string") return { kind: "group", groupId: page.groupId };
+  return undefined;
+}
+
 export function loadWindow(): SavedWindow | null {
   try {
     const raw = localStorage.getItem(KEY);
@@ -46,7 +56,7 @@ export function loadWindow(): SavedWindow | null {
     if (!parsed || typeof parsed.roomId !== "string" || !Array.isArray(parsed.lights)) return null;
     return {
       roomId: parsed.roomId,
-      page: parsed.page?.kind === "group" && typeof parsed.page.groupId === "string" ? parsed.page : { kind: "room" },
+      open: openOf(parsed.open, (parsed as { page?: unknown }).page),
       lookByRoom: parsed.lookByRoom && typeof parsed.lookByRoom === "object" ? parsed.lookByRoom : {},
       theme: parsed.theme === "light" || parsed.theme === "dark" ? parsed.theme : "system",
       lights: parsed.lights.filter((light) => light && typeof light.id === "string" && typeof light.name === "string"),

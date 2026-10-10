@@ -47,7 +47,9 @@ export type Look = {
 };
 
 export type ThemeMode = "system" | "light" | "dark";
-export type Page = { kind: "room" } | { kind: "group"; groupId: string };
+export type Open = { kind: "none" } | { kind: "room" } | { kind: "group"; groupId: string } | { kind: "light"; lightId: string };
+export type SetTarget = { kind: "room" } | { kind: "group"; groupId: string };
+export type PaintPatch = { mode?: "color" | "white"; hue?: number; saturation?: number; kelvin?: number; brightness?: number };
 export type Effect = {
   name: string;
   target: string;
@@ -98,10 +100,9 @@ type OfficeState = {
   groups: Group[];
   looks: Look[];
   roomId: string;
-  page: Page;
+  open: Open;
   lookByRoom: Record<string, string | null>;
   selectedLookId: string | null;
-  selectedLightId: string | null;
   effect: Effect;
   theme: ThemeMode;
   notice: Notice;
@@ -112,11 +113,10 @@ type OfficeState = {
   selectLook: (lookId: string) => void;
   selectLight: (lightId: string) => void;
   setBrightness: (lightId: string, brightness: number) => void;
-  setLightPaint: (
-    lightId: string,
-    patch: { mode?: "color" | "white"; hue?: number; saturation?: number; kelvin?: number; brightness?: number },
-  ) => void;
+  setLightPaint: (lightId: string, patch: PaintPatch) => void;
+  setSetPaint: (target: SetTarget, patch: PaintPatch) => void;
   setPower: (lightId: string, on: boolean) => void;
+  setSetPower: (target: SetTarget, on: boolean) => void;
   setGroupPower: (groupId: string, on: boolean) => void;
   roomOff: () => void;
   startCycle: () => void;
@@ -140,7 +140,7 @@ function messageOf(err: unknown) {
 function snapshot(state: OfficeState) {
   return {
     roomId: state.roomId,
-    page: state.page,
+    open: state.open,
     lookByRoom: state.lookByRoom,
     theme: state.theme,
     lights: state.lights,
@@ -167,13 +167,18 @@ function layout(saved: ReturnType<typeof loadWindow>) {
   return { rooms, groups, reseed };
 }
 
+function reopened(open: Open | undefined, room: Room, lights: Light[]): Open {
+  if (!open) return { kind: "none" };
+  if (open.kind === "group") return room.groupIds.includes(open.groupId) ? open : { kind: "none" };
+  if (open.kind === "light") return lights.some((light) => light.id === open.lightId && light.roomId === room.id) ? open : { kind: "none" };
+  return open;
+}
+
 function opened() {
   const saved = loadWindow();
   const { rooms, groups: laidOut, reseed } = layout(saved);
   const room = rooms.find((item) => item.id === saved?.roomId) ?? rooms.find((item) => item.id === "office") ?? rooms[0];
   if (!room) throw new Error("Office is missing");
-  let page: Page = saved?.page ?? { kind: "room" };
-  if (page.kind === "group" && !room.groupIds.includes(page.groupId)) page = { kind: "room" };
   const lookByRoom: Record<string, string | null> = { office: null, ...saved?.lookByRoom };
   const lights = (saved?.lights ?? [])
     .filter((light) => !sampleIds.has(light.id))
@@ -190,9 +195,10 @@ function opened() {
       };
     });
   const groups = reseed ? placeLights(lights, rooms, laidOut, new Set(lights.map((light) => light.id))) : laidOut;
+  const open = reopened(saved?.open, room, lights);
   return {
     roomId: room.id,
-    page,
+    open,
     lookByRoom,
     selectedLookId: lookByRoom[room.id] ?? null,
     theme: saved?.theme ?? "system",
@@ -203,6 +209,8 @@ function opened() {
 }
 
 const paintTimer = new Map<string, ReturnType<typeof setTimeout>>();
+const setTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const setGenerations = new Map<string, Map<string, number>>();
 let quiet = false;
 let effectSync = 0;
 
@@ -226,15 +234,13 @@ function fieldsOf(light: Light) {
   });
 }
 
-function paintLight(
-  light: Light,
-  patch: { mode?: "color" | "white"; hue?: number; saturation?: number; kelvin?: number; brightness?: number },
-): Light {
+function paintLight(light: Light, patch: PaintPatch): Light {
   const mode = light.ability === "white" ? "white" : (patch.mode ?? light.mode);
   const hue = patch.hue ?? light.hue ?? 0;
   const saturation = patch.saturation ?? light.saturation ?? 0;
   const kelvin = clampKelvin(patch.kelvin ?? light.kelvin ?? 3800, kelvinRangeOf(light.kelvinRange));
   const brightness = patch.brightness ?? light.brightness;
+  const color = lightSwatch({ mode, hue, saturation, kelvin }, light.color);
   return {
     ...light,
     mode,
@@ -242,7 +248,8 @@ function paintLight(
     saturation,
     kelvin,
     brightness,
-    color: lightSwatch({ mode, hue, saturation, kelvin }, light.color),
+    color,
+    zones: light.zones?.map(() => color),
   };
 }
 
@@ -254,7 +261,6 @@ async function sendLive(live: boolean, run: () => Promise<unknown>) {
 export const useOffice = create<OfficeState>((set, get) => ({
   ...opened(),
   looks,
-  selectedLightId: null,
   effect: null,
   notice: null,
   setTheme: (theme) => {
@@ -271,13 +277,12 @@ export const useOffice = create<OfficeState>((set, get) => ({
     if (!room) return;
     set({
       roomId,
-      page: { kind: "room" },
+      open: { kind: "none" },
       selectedLookId: get().lookByRoom[roomId] ?? null,
-      selectedLightId: null,
     });
   },
-  openGroup: (groupId) => set({ page: { kind: "group", groupId }, selectedLightId: null }),
-  openRoom: () => set({ page: { kind: "room" }, selectedLightId: null }),
+  openGroup: (groupId) => set({ open: { kind: "group", groupId } }),
+  openRoom: () => set({ open: { kind: "room" } }),
   selectLook: (lookId) => {
     const previousLook = get().selectedLookId;
     const previousEffect = get().effect;
@@ -298,7 +303,7 @@ export const useOffice = create<OfficeState>((set, get) => ({
       });
     });
   },
-  selectLight: (lightId) => set({ selectedLightId: lightId }),
+  selectLight: (lightId) => set({ open: { kind: "light", lightId } }),
   setBrightness: (lightId, brightness) => get().setLightPaint(lightId, { brightness }),
   setLightPaint: (lightId, patch) => {
     const found = get().lights.find((light) => light.id === lightId);
@@ -361,37 +366,58 @@ export const useOffice = create<OfficeState>((set, get) => ({
     });
     void sendPower(lightId, on, generation, current.live);
   },
-  setGroupPower: (groupId, on) => {
-    const group = get().groups.find((item) => item.id === groupId);
-    if (!group) return;
-    const targets = get().lights.filter((light) => group.lightIds.includes(light.id) && !light.offline);
-    const room = get().rooms.find((item) => item.groupIds.includes(groupId));
-    if (room) haltEffect(room.id);
-    set({
-      lights: patch(get().lights, group.lightIds, on),
-      notice: get().notice?.scope === groupId ? null : get().notice,
+  setGroupPower: (groupId, on) => get().setSetPower({ kind: "group", groupId }, on),
+  roomOff: () => get().setSetPower({ kind: "room" }, false),
+  setSetPower: (target, on) => {
+    const state = get();
+    const ids = memberIds(state, target).filter((id) => state.lights.some((light) => light.id === id && !light.offline));
+    if (ids.length === 0) return;
+    const scope = scopeOf(target, state.roomId);
+    haltEffect(state.roomId);
+    const jobs = ids.flatMap((id) => {
+      const light = get().lights.find((item) => item.id === id);
+      return light ? [{ id, live: light.live, generation: beginPower(id, light.on) }] : [];
     });
-    void settlePower(
-      targets.map((light) => ({ id: light.id, on, live: light.live, generation: beginPower(light.id, light.on) })),
-      groupId,
-    );
+    set({
+      lights: patch(get().lights, ids, on),
+      notice: get().notice?.scope === scope ? null : get().notice,
+    });
+    sendPowers(jobs, on, scope);
   },
-  roomOff: () => {
-    const room = get().rooms.find((item) => item.id === get().roomId);
-    if (!room) return;
-    const targets = get().lights.filter((light) => light.roomId === room.id && !light.offline);
-    haltEffect(room.id);
-    set({
-      lights: patch(
-        get().lights,
-        targets.map((light) => light.id),
-        false,
-      ),
-      notice: null,
-    });
-    void settlePower(
-      targets.map((light) => ({ id: light.id, on: false, live: light.live, generation: beginPower(light.id, light.on) })),
-      room.id,
+  setSetPaint: (target, paintPatch) => {
+    const state = get();
+    const ids = memberIds(state, target).filter((id) => state.lights.some((light) => light.id === id && !light.offline));
+    if (ids.length === 0) return;
+    const key = targetKey(target);
+    const scope = scopeOf(target, state.roomId);
+    haltEffect(state.roomId);
+    const generations = setGenerations.get(key) ?? new Map<string, number>();
+    const painted = new Map<string, Light>();
+    for (const id of ids) {
+      const current = get().lights.find((light) => light.id === id);
+      if (!current) continue;
+      generations.set(id, beginPaint(id, fieldsOf(current)));
+      const next = paintLight(current, paintPatch);
+      stagePaint(id, fieldsOf(next));
+      painted.set(id, next);
+    }
+    setGenerations.set(key, generations);
+    quietly(() =>
+      set({
+        lights: get().lights.map((light) => painted.get(light.id) ?? light),
+        notice: get().notice?.scope === scope ? null : get().notice,
+      }),
+    );
+    const pending = setTimers.get(key);
+    if (pending) clearTimeout(pending);
+    setTimers.set(
+      key,
+      setTimeout(() => {
+        setTimers.delete(key);
+        const sending = setGenerations.get(key);
+        setGenerations.delete(key);
+        if (sending) sendPaints(sending, scope);
+      }, 120),
     );
   },
   startCycle: () => {
@@ -416,7 +442,7 @@ export const useOffice = create<OfficeState>((set, get) => ({
   startGradient: () => {
     const roomId = get().roomId;
     const previous = get().effect;
-    const strip = get().lights.find((light) => light.roomId === roomId && light.ability === "multizone" && light.live && !light.offline);
+    const strip = gradientStrip(get());
     if (!strip) return;
     releasePaint();
     const effect: Effect = {
@@ -512,39 +538,112 @@ function sendPower(id: string, on: boolean, generation: number, live: boolean) {
     });
 }
 
-function settlePower(
-  jobs: { id: string; on: boolean; live: boolean; generation: number }[],
-  scope: string,
-) {
-  void Promise.all(
-    jobs.map(async (job) => {
-      try {
-        await sendLive(job.live, () => lifx("setPower", { deviceId: job.id, on: job.on }));
+type SetResult = { deviceId?: string; ok?: boolean; error?: string };
+
+function failuresOf(result: unknown, ids: string[], err: unknown) {
+  if (err !== undefined) return new Map(ids.map((id) => [id, messageOf(err)]));
+  const results = (result as { results?: SetResult[] } | null)?.results ?? [];
+  return new Map(results.flatMap((item) => (item.deviceId && item.ok === false ? [[item.deviceId, item.error || messageOf(null)] as const] : [])));
+}
+
+function setNotice(failures: Map<string, string>, total: number, scope: string) {
+  const [first] = failures.values();
+  if (!first) return null;
+  const names = [...failures.keys()].map((id) => useOffice.getState().lights.find((light) => light.id === id)?.name ?? id);
+  const message = failures.size === total ? first : `${names.join(", ")} did not change: ${first}`;
+  return { scope, message };
+}
+
+function sendPowers(jobs: { id: string; live: boolean; generation: number }[], on: boolean, scope: string) {
+  const sending = sidecarAvailable() ? jobs.filter((job) => job.live) : [];
+  for (const job of jobs) if (!sending.includes(job)) finishPower(job.id, job.generation);
+  if (sending.length === 0) {
+    saveWindow(snapshot(useOffice.getState()));
+    return;
+  }
+  const settle = (result: unknown, err?: unknown) => {
+    const failures = failuresOf(result, sending.map((job) => job.id), err);
+    const restored = new Map<string, boolean>();
+    for (const job of sending) {
+      if (!failures.has(job.id)) {
         finishPower(job.id, job.generation);
-        return null;
-      } catch (err) {
-        const before = failPower(job.id, job.generation);
-        if (before === null) return null;
-        return { id: job.id, before, err };
+        continue;
       }
-    }),
-  ).then((results) => {
-    const failed = results.flatMap((item) => (item ? [item] : []));
-    if (failed.length === 0) {
+      const before = failPower(job.id, job.generation);
+      if (before !== null) restored.set(job.id, before);
+      else failures.delete(job.id);
+    }
+    if (restored.size === 0) {
       saveWindow(snapshot(useOffice.getState()));
       syncEffect();
       return;
     }
-    const first = failed[0];
-    if (!first) return;
     useOffice.setState({
-      lights: useOffice.getState().lights.map((light) => {
-        const miss = failed.find((item) => item.id === light.id);
-        return miss ? { ...light, on: miss.before } : light;
-      }),
-      notice: { scope, message: messageOf(first.err) },
+      lights: useOffice.getState().lights.map((light) => (restored.has(light.id) ? { ...light, on: restored.get(light.id) ?? light.on } : light)),
+      notice: setNotice(failures, sending.length, scope),
     });
-  });
+  };
+  void lifx("setPowers", { deviceIds: sending.map((job) => job.id), on }).then(
+    (result) => settle(result),
+    (err: unknown) => settle(null, err),
+  );
+}
+
+function sendPaints(generations: Map<string, number>, scope: string) {
+  const state = useOffice.getState();
+  const sending: { id: string; generation: number; color: Record<string, number | string> }[] = [];
+  for (const [id, generation] of generations) {
+    const sent = sentPaint(id, generation);
+    if (!sent) continue;
+    const light = state.lights.find((item) => item.id === id);
+    if (!light?.live || !sidecarAvailable()) {
+      finishPaint(id, generation);
+      continue;
+    }
+    const white = sent.mode === "white";
+    sending.push({
+      id,
+      generation,
+      color: {
+        deviceId: id,
+        brightness: sent.brightness,
+        kelvin: sent.kelvin,
+        hue: white ? 0 : sent.hue,
+        saturation: white ? 0 : sent.saturation,
+      },
+    });
+  }
+  if (sending.length === 0) {
+    saveWindow(snapshot(useOffice.getState()));
+    return;
+  }
+  const settle = (result: unknown, err?: unknown) => {
+    const failures = failuresOf(result, sending.map((job) => job.id), err);
+    const restored = new Map<string, Light>();
+    for (const job of sending) {
+      if (!failures.has(job.id)) {
+        finishPaint(job.id, job.generation);
+        continue;
+      }
+      const latest = useOffice.getState().lights.find((item) => item.id === job.id);
+      const back = latest ? failPaint(latest, job.id, job.generation) : null;
+      if (latest && back && back !== latest) restored.set(job.id, back);
+      else failures.delete(job.id);
+    }
+    if (restored.size === 0) {
+      saveWindow(snapshot(useOffice.getState()));
+      syncEffect();
+      return;
+    }
+    useOffice.setState({
+      lights: useOffice.getState().lights.map((light) => restored.get(light.id) ?? light),
+      notice: setNotice(failures, sending.length, scope),
+    });
+  };
+  void lifx("setColors", { lights: sending.map((job) => job.color) }).then(
+    (result) => settle(result),
+    (err: unknown) => settle(null, err),
+  );
 }
 
 useOffice.subscribe((state) => {
@@ -559,29 +658,55 @@ useOffice.subscribe((state) => {
   }, 200);
 });
 
-export function cycleSelection(state: {
-  lights: Light[];
-  rooms: Room[];
-  groups: Group[];
-  roomId: string;
-  page: Page;
-  selectedLightId: string | null;
-}) {
+type Roster = { lights: Light[]; rooms: Room[]; groups: Group[]; roomId: string; open: Open };
+
+export function openLightId(state: { open: Open }) {
+  return state.open.kind === "light" ? state.open.lightId : null;
+}
+
+export function openTarget(state: { open: Open }): SetTarget | null {
+  const open = state.open;
+  if (open.kind === "room") return { kind: "room" };
+  if (open.kind === "group") return { kind: "group", groupId: open.groupId };
+  return null;
+}
+
+export function targetKey(target: SetTarget) {
+  return target.kind === "room" ? "room" : `group:${target.groupId}`;
+}
+
+function scopeOf(target: SetTarget, roomId: string) {
+  return target.kind === "room" ? roomId : target.groupId;
+}
+
+export function memberIds(state: { lights: Light[]; groups: Group[]; roomId: string }, target: SetTarget) {
+  if (target.kind === "room") return state.lights.filter((light) => light.roomId === state.roomId).map((light) => light.id);
+  const ids = state.groups.find((group) => group.id === target.groupId)?.lightIds ?? [];
+  return ids.filter((id) => state.lights.some((light) => light.id === id && light.roomId === state.roomId));
+}
+
+export function gradientStrip(state: Roster) {
+  const target = openTarget(state);
+  const ids = target?.kind === "group" ? new Set(memberIds(state, target)) : null;
+  return state.lights.find(
+    (light) => light.roomId === state.roomId && light.ability === "multizone" && light.live && !light.offline && (!ids || ids.has(light.id)),
+  );
+}
+
+export function cycleSelection(state: Roster) {
   const room = state.rooms.find((item) => item.id === state.roomId);
-  const inRoom = (id: string) => state.lights.find((light) => light.id === id && light.roomId === state.roomId && light.live && !light.offline);
-  if (state.selectedLightId) {
-    const selected = state.lights.find((light) => light.id === state.selectedLightId && light.roomId === state.roomId);
+  const live = (id: string) => state.lights.some((light) => light.id === id && light.roomId === state.roomId && light.live && !light.offline);
+  const open = state.open;
+  if (open.kind === "light") {
+    const selected = state.lights.find((light) => light.id === open.lightId && light.roomId === state.roomId);
     if (!selected || !selected.live || selected.offline) return { target: selected?.name ?? "Light", lightIds: [] as string[] };
     return { target: selected.name, lightIds: [selected.id] };
   }
-  const page = state.page;
-  if (page.kind === "group") {
-    const group = state.groups.find((item) => item.id === page.groupId);
-    const lightIds = (group?.lightIds ?? []).filter((id) => inRoom(id));
-    return { target: group?.name ?? "Group", lightIds };
+  if (open.kind === "group") {
+    const group = state.groups.find((item) => item.id === open.groupId);
+    return { target: group?.name ?? "Group", lightIds: memberIds(state, open).filter(live) };
   }
-  const lightIds = state.lights.filter((light) => light.roomId === state.roomId && light.live && !light.offline).map((light) => light.id);
-  return { target: room?.name ?? "Office", lightIds };
+  return { target: room?.name ?? "Office", lightIds: memberIds(state, { kind: "room" }).filter(live) };
 }
 
 function effectFromStatus(status: { running?: boolean; kind?: string; deviceId?: string | null; deviceIds?: string[] | null }, roomId: string): Effect {
@@ -680,8 +805,10 @@ function hearFrames() {
 }
 
 function releasePaint() {
-  for (const timer of paintTimer.values()) clearTimeout(timer);
+  for (const timer of [...paintTimer.values(), ...setTimers.values()]) clearTimeout(timer);
   paintTimer.clear();
+  setTimers.clear();
+  setGenerations.clear();
   for (const edit of pendingEdits.values()) {
     if (edit.paint) delete edit.paint;
   }
@@ -690,15 +817,15 @@ function releasePaint() {
 function showDiscovered(devices: DeviceSnap[]) {
   const current = useOffice.getState();
   const lights = mergeDevices(current.lights, devices, new Set(current.effect?.lightIds ?? []));
-  const selectedLightId = lights.some((light) => light.id === current.selectedLightId) ? current.selectedLightId : null;
+  const open = current.open.kind === "light" && !lights.some((light) => light.id === openLightId(current)) ? ({ kind: "none" } as const) : current.open;
   const effect = liveEffect(current.effect, lights);
   const known = new Set(current.lights.map((light) => light.id));
   const fresh = new Set(lights.filter((light) => !known.has(light.id)).map((light) => light.id));
   if (fresh.size === 0) {
-    quietly(() => useOffice.setState({ lights, selectedLightId, effect }));
+    quietly(() => useOffice.setState({ lights, open, effect }));
     return;
   }
-  useOffice.setState({ lights, selectedLightId, effect, groups: placeLights(lights, current.rooms, current.groups, fresh) });
+  useOffice.setState({ lights, open, effect, groups: placeLights(lights, current.rooms, current.groups, fresh) });
 }
 
 let discoveryWatch: ReturnType<typeof setInterval> | undefined;
