@@ -11,6 +11,16 @@ const painted = {
   color: "#c45a28",
 };
 
+test("a list with nobody dragging keeps the effect color", () => {
+  pendingEdits.clear();
+  const light = { id: "bulb", ...painted, on: true, name: "Desk", roomId: "office" };
+  const listed = { ...light, hue: 200, saturation: 90, color: "#2244aa", brightness: 80 };
+  const merged = mergeHeld(light, listed, undefined, false);
+  assert.equal(merged.color, "#2244aa");
+  assert.equal(merged.hue, 200);
+  assert.equal(merged.mode, "color");
+});
+
 test("a list during a drag keeps the painted color", () => {
   pendingEdits.clear();
   const light = { id: "bulb", ...painted, on: true, name: "Desk", roomId: "office" };

@@ -71,7 +71,7 @@ function applyDevice(light: Light, device: DeviceSnap, edit: PendingEdit | undef
   const saturation = device.color?.saturation ?? light.saturation ?? 0;
   const kelvin = device.color?.kelvin ?? light.kelvin ?? 3800;
   const brightness = device.color?.brightness ?? light.brightness;
-  const color = lightSwatch({ mode, hue, saturation, kelvin }, light.color);
+  const color = colorHex(device.color, light.color);
   const zones = device.zones?.map((zone) => colorHex(zone, color));
   const incoming: Light = {
     ...light,

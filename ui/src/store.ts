@@ -362,6 +362,7 @@ export const useOffice = create<OfficeState>((set, get) => ({
     const roomId = get().roomId;
     const selection = cycleSelection(get());
     if (selection.lightIds.length === 0) return;
+    releasePaint();
     const previous = get().effect;
     const effect: Effect = {
       name: "Color cycle",
@@ -381,6 +382,7 @@ export const useOffice = create<OfficeState>((set, get) => ({
     const previous = get().effect;
     const strip = get().lights.find((light) => light.roomId === roomId && light.ability === "multizone" && light.live && !light.offline);
     if (!strip) return;
+    releasePaint();
     const effect: Effect = {
       name: "Moving gradient",
       target: strip.name,
@@ -570,13 +572,28 @@ function effectFromStatus(status: { running?: boolean; kind?: string; deviceId?:
   };
 }
 
+function liveEffect(effect: Effect, lights: Light[]): Effect {
+  if (!effect) return effect;
+  const id = effect.lightIds[0];
+  const color = id ? lights.find((light) => light.id === id)?.color : undefined;
+  if (!color || color === effect.accent) return effect;
+  return { ...effect, accent: color };
+}
+
+function releasePaint() {
+  for (const timer of paintTimer.values()) clearTimeout(timer);
+  paintTimer.clear();
+  for (const edit of pendingEdits.values()) {
+    if (edit.paint) delete edit.paint;
+  }
+}
+
 function showDiscovered(devices: DeviceSnap[]) {
   const current = useOffice.getState();
-  const hold = new Set<string>();
-  if (current.selectedLightId && current.effect?.lightIds.includes(current.selectedLightId)) hold.add(current.selectedLightId);
-  const lights = mergeDevices(current.lights, devices, hold);
+  const lights = mergeDevices(current.lights, devices);
   const selectedLightId = lights.some((light) => light.id === current.selectedLightId) ? current.selectedLightId : null;
-  quietly(() => useOffice.setState({ lights, selectedLightId }));
+  const effect = liveEffect(current.effect, lights);
+  quietly(() => useOffice.setState({ lights, selectedLightId, effect }));
 }
 
 let discoveryWatch: ReturnType<typeof setInterval> | undefined;
@@ -598,7 +615,7 @@ export function openWindow() {
   };
   pull();
   if (discoveryWatch) return;
-  discoveryWatch = setInterval(pull, 1500);
+  discoveryWatch = setInterval(pull, 500);
 }
 
 export function groupPower(lights: Light[], ids: string[]) {
