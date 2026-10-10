@@ -1,0 +1,11 @@
+{
+  "name": "staylit",
+  "private": true,
+  "version": "0.1.0",
+  "description": "StayLit desktop hub for LIFX lights on the local network",
+  "scripts": {
+    "test": "npm test --prefix sidecar",
+    "build": "npm run build --prefix sidecar",
+    "postinstall": "npm install --prefix sidecar"
+  }
+}
