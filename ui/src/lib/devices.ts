@@ -94,6 +94,7 @@ function applyDevice(light: Light, device: DeviceSnap, edit: PendingEdit | undef
     zones: zones ?? light.zones,
   };
   const held = mergeHeld(light, incoming, edit, holdPaint);
+  if (holdPaint) held.zones = light.zones;
   return held.on === light.on &&
     held.color === light.color &&
     held.brightness === light.brightness &&
@@ -104,7 +105,7 @@ function applyDevice(light: Light, device: DeviceSnap, edit: PendingEdit | undef
     held.name === light.name &&
     held.offline === light.offline &&
     held.ability === light.ability &&
-    (zones ?? light.zones)?.join() === light.zones?.join()
+    held.zones?.join() === light.zones?.join()
     ? light
     : { ...held, on: heldPower(light.on, discoveredOn, edit) };
 }

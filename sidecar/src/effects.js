@@ -86,17 +86,21 @@ function createColorCycle(spec) {
         : this.deviceId
           ? [this.deviceId]
           : await player.deviceIds();
+      const color = {
+        hue,
+        saturation: this.saturation,
+        brightness: this.brightness,
+        kelvin: this.kelvin
+      };
       for (let i = 0; i < ids.length; i += 1) {
         await player.setColor({
           deviceId: ids[i],
-          hue,
-          saturation: this.saturation,
-          brightness: this.brightness,
-          kelvin: this.kelvin,
+          ...color,
           durationMs: this.durationMs,
           wait: false
         });
       }
+      return { lights: ids.map((deviceId) => ({ deviceId, ...color })) };
     }
   };
 }
@@ -137,6 +141,10 @@ function createMovingGradient(spec) {
         writes,
         wait: false
       });
+      const zones = shifted.map(({ hue, saturation, brightness, kelvin }) => ({ hue, saturation, brightness, kelvin }));
+      return {
+        lights: [{ deviceId: this.deviceId, ...zones[Math.floor(zones.length / 2)], zones }]
+      };
     }
   };
 }
@@ -159,10 +167,27 @@ function delay(ms, signal) {
 }
 
 class EffectRuntime {
-  constructor(sleep = delay) {
-    this.sleep = sleep;
+  constructor(sleep = delay, onFrame = null) {
+    this.sleep = sleep || delay;
+    this.onFrame = onFrame;
     this.controller = null;
     this.state = null;
+  }
+
+  emitFrame(effect, frame) {
+    if (!this.onFrame || !frame || !Array.isArray(frame.lights) || frame.lights.length === 0) {
+      return;
+    }
+    try {
+      this.onFrame({
+        kind: effect.kind,
+        durationMs: effect.durationMs,
+        intervalMs: effect.intervalMs,
+        lights: frame.lights
+      });
+    } catch {
+      // A window that cannot take the frame must not stop the bulbs.
+    }
   }
 
   start(effect, player) {
@@ -187,9 +212,10 @@ class EffectRuntime {
     try {
       while (!signal.aborted && state) {
         try {
-          await state.effect.tick(state.player);
+          const frame = await state.effect.tick(state.player);
           if (!signal.aborted) {
             state.lastError = null;
+            this.emitFrame(state.effect, frame);
           }
         } catch (err) {
           if (!signal.aborted) {

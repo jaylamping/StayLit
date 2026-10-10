@@ -3,7 +3,8 @@ import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { hueHex } from "@/lib/devices";
-import { sampleZones, wellFill, wellStyle } from "@/lib/well";
+import { meterBead, meterShift, meterSpan, watchLeadHue } from "@/lib/frames";
+import { lampStyle, liveZones, wellFill, wellStyle } from "@/lib/well";
 import { cycleIntervalMs, cycleSelection, useOffice, type Light } from "@/store";
 
 const hueNames: [number, string][] = [
@@ -38,11 +39,11 @@ function hueName(hue: number) {
   return best[1];
 }
 
-const meterSpan = 90;
-const beadAt = 0.38;
-const hueAt = (hue: number, position: number) => hue + meterSpan * (beadAt - position);
+const hueAt = (hue: number, position: number) => hue + meterSpan * (meterBead - position);
 const hueTrack = `linear-gradient(90deg, ${[0, 60, 120, 180, 240, 300, 360].map((hue) => hueHex(hue)).join(", ")})`;
+const hueWheel = `linear-gradient(90deg, ${Array.from({ length: 13 }, (_, index) => `${hueHex(360 - index * 30)} ${(index * 100) / 12}%`).join(", ")})`;
 const kelvinTrack = "linear-gradient(90deg, #ffb46b, #ffe4c8 50%, #e6eeff)";
+const idleGlow = "#e39a45";
 
 function lightMeta(light: Light, driven: string | null) {
   if (light.offline) return "Offline";
@@ -53,29 +54,63 @@ function lightMeta(light: Light, driven: string | null) {
   return `Color · ${light.brightness}%`;
 }
 
-function Meter({ background, bead, labels }: { background: string; bead: string | null; labels: [string, string, string] }) {
+function hueLabels(hue: number) {
+  return [hueName(hueAt(hue, 0)), hueName(hue), hueName(hueAt(hue, 1))];
+}
+
+function MeterScale({ labels, refs }: { labels: string[]; refs?: { current: (HTMLSpanElement | null)[] } }) {
   return (
-    <div className="mt-[18px]">
-      <div className="hue-meter" style={{ background, "--meter": bead ?? "transparent" } as CSSProperties}>
-        {bead ? <span className="hue-bead" /> : null}
-      </div>
-      <div className="mt-[7px] flex justify-between text-[10.5px] text-dim">
-        {labels.map((label, index) => (
-          <span key={`${index}-${label}`}>{label}</span>
-        ))}
-      </div>
+    <div className="mt-[7px] flex justify-between text-[10.5px] text-dim">
+      {labels.map((label, index) => (
+        <span
+          key={index}
+          ref={(node) => {
+            if (refs) refs.current[index] = node;
+          }}
+        >
+          {label}
+        </span>
+      ))}
     </div>
   );
 }
 
-function CycleMeter({ hue, accent }: { hue: number; accent: string }) {
-  const stops = [0, 0.25, beadAt, 0.5, 0.75, 1].map((position) => `${hueHex(hueAt(hue, position))} ${position * 100}%`);
+function CycleMeter({ hue }: { hue: number }) {
+  const labels = useRef<(HTMLSpanElement | null)[]>([]);
+  useEffect(
+    () =>
+      watchLeadHue((next) => {
+        hueLabels(next).forEach((label, index) => {
+          const node = labels.current[index];
+          if (node && node.textContent !== label) node.textContent = label;
+        });
+      }),
+    [],
+  );
   return (
-    <Meter
-      background={`linear-gradient(90deg, ${stops.join(", ")})`}
-      bead={accent}
-      labels={[hueName(hueAt(hue, 0)), hueName(hue), hueName(hueAt(hue, 1))]}
-    />
+    <div className="hue-wheel mt-[18px]">
+      <div className="hue-meter fx-zones" style={{ backgroundImage: hueWheel, "--shift-from": meterShift(hue) } as CSSProperties}>
+        <span className="hue-bead" />
+      </div>
+      <MeterScale labels={hueLabels(hue)} refs={labels} />
+    </div>
+  );
+}
+
+function GradientMeter({ lead }: { lead: Light | null }) {
+  const zones = lead?.zones?.length ? lead.zones : null;
+  const live = lead && zones ? liveZones(lead.id, zones, 6) : null;
+  return (
+    <div className="mt-[18px]">
+      <div
+        className="hue-meter fx-zones"
+        style={{
+          ...live?.style,
+          background: live ? `linear-gradient(90deg, ${live.stops.join(", ")})` : "linear-gradient(90deg, #3a2418, #b8743c, #f3d7b4, #6e3d2a, #3a2418)",
+        }}
+      />
+      <MeterScale labels={["Zone 1", "", `Zone ${zones?.length ?? ""}`.trim()]} />
+    </div>
   );
 }
 
@@ -106,18 +141,18 @@ const EffectBand = memo(function EffectBand() {
   const startGradient = useOffice((state) => state.startGradient);
   const stopEffect = useOffice((state) => state.stopEffect);
   const here = effect?.roomId === roomId ? effect : null;
-  const glow = here?.accent ?? lookAccent ?? "#e39a45";
-  const zones = lead?.zones?.length ? sampleZones(lead.zones, 12) : null;
+  const resting = here?.accent || (lead ? wellFill(lead) : null) || lookAccent || idleGlow;
+  const lamp = here && lead ? lampStyle(lead.id, resting) : ({ "--lamp": lookAccent ?? idleGlow } as CSSProperties);
   return (
     <div
-      className="fx-band min-h-[158px] shrink-0 border-b border-border px-[26px] pt-[22px] pb-5"
-      style={{ "--glow": glow, "--glow-strength": here ? "30%" : "16%" } as CSSProperties}
+      className={here ? "fx-band fx-lamp min-h-[158px] shrink-0 border-b border-border px-[26px] pt-[22px] pb-5" : "fx-band min-h-[158px] shrink-0 border-b border-border px-[26px] pt-[22px] pb-5"}
+      style={{ ...lamp, "--glow-strength": here ? "30%" : "16%" } as CSSProperties}
     >
       <div className="flex items-start gap-4">
         <div className="min-w-0 flex-1">
           {here ? (
             <>
-              <div className="text-[10.5px] font-semibold tracking-[0.1em] uppercase" style={{ color: `color-mix(in srgb, ${here.accent} 45%, #ffffff)` }}>
+              <div className="text-[10.5px] font-semibold tracking-[0.1em] uppercase" style={{ color: "color-mix(in srgb, var(--lamp) 45%, #ffffff)" }}>
                 Running
               </div>
               <h1 className="mt-1.5 mb-0.5 text-[26px] leading-tight font-semibold tracking-[-0.03em]">{here.name}</h1>
@@ -142,14 +177,8 @@ const EffectBand = memo(function EffectBand() {
           </Button>
         ) : null}
       </div>
-      {here?.kind === "color-cycle" ? <CycleMeter hue={lead?.hue ?? 30} accent={here.accent} /> : null}
-      {here?.kind === "moving-gradient" ? (
-        <Meter
-          background={zones ? `linear-gradient(90deg, ${zones.join(", ")})` : "linear-gradient(90deg, #3a2418, #b8743c, #f3d7b4, #6e3d2a, #3a2418)"}
-          bead={null}
-          labels={["Zone 1", "", `Zone ${lead?.zones?.length ?? ""}`.trim()]}
-        />
-      ) : null}
+      {here?.kind === "color-cycle" ? <CycleMeter hue={lead?.hue ?? 30} /> : null}
+      {here?.kind === "moving-gradient" ? <GradientMeter lead={lead} /> : null}
       {here ? null : (
         <div className="mt-[18px] flex flex-wrap gap-2">
           <Button variant="ghost" className="h-7 px-3" onClick={() => startCycle()}>
@@ -264,7 +293,7 @@ const LightPanel = memo(function LightPanel({ id }: { id: string }) {
   const driven = useOffice((state) =>
     state.effect && state.effect.roomId === state.roomId && state.effect.lightIds.includes(id) ? state.effect.name : null,
   );
-  const drivenColor = useOffice((state) => (state.effect?.lightIds.includes(id) ? state.effect.accent : null));
+  const accent = useOffice((state) => (state.effect?.lightIds.includes(id) ? state.effect.accent : ""));
   const setLightPaint = useOffice((state) => state.setLightPaint);
   const roomIds = useOffice(useShallow((state) => state.rooms.map((room) => room.id)));
   const roomNames = useOffice(useShallow((state) => state.rooms.map((room) => room.name)));
@@ -282,12 +311,15 @@ const LightPanel = memo(function LightPanel({ id }: { id: string }) {
   if (!light) return null;
   const white = light.mode === "white";
   const groupName = groupNames[groupIds.indexOf(groupId ?? "")] ?? null;
-  const fill = wellFill(light, drivenColor);
   const lit = Boolean(driven && light.on);
+  const fill = lit ? "var(--lamp)" : wellFill(light);
   return (
     <div>
       <div className="mb-3.5 flex items-center gap-3">
-        <span className="size-11 shrink-0 rounded-[12px]" style={wellStyle(light, fill, { driven: lit, size: 44 })} />
+        <span
+          className={lit ? "fx-lamp fx-zones size-11 shrink-0 rounded-[12px]" : "size-11 shrink-0 rounded-[12px]"}
+          style={lit ? { ...lampStyle(light.id, accent || wellFill(light)), ...wellStyle(light, fill, { driven: true, size: 44 }) } : wellStyle(light, fill, { size: 44 })}
+        />
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-semibold tracking-[-0.01em]">{light.name}</div>
           <p className="truncate text-xs text-muted tabular-nums">{[groupName, lightMeta(light, driven)].filter(Boolean).join(" · ")}</p>

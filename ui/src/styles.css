@@ -98,6 +98,58 @@ body {
   user-select: none;
 }
 
+@property --lamp {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e39a45;
+}
+@property --z1 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z2 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z3 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z4 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z5 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --z6 {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
+/* --fx-ms is the bulbs' fade for the current effect frame, so the window lands when they do.
+   Only the element that sets --lamp eases it; children inherit the eased value. */
+.fx-lamp {
+  transition: --lamp var(--fx-ms, 0ms) linear;
+}
+
+.fx-zones {
+  transition-property: --z1, --z2, --z3, --z4, --z5, --z6, background-color, background-position;
+  transition-duration: var(--fx-ms, 0ms);
+  transition-timing-function: linear;
+}
+
+.fx-lamp.fx-zones {
+  transition-property: --lamp, --z1, --z2, --z3, --z4, --z5, --z6, background-color, background-position;
+}
+
 .fx-band {
   position: relative;
   overflow: hidden;
@@ -111,7 +163,7 @@ body {
   width: 520px;
   height: 360px;
   pointer-events: none;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--glow, #e39a45) var(--glow-strength, 30%), transparent), transparent);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--lamp) var(--glow-strength, 30%), transparent), transparent);
 }
 
 .fx-band > * {
@@ -124,6 +176,16 @@ body {
   border-radius: 4px;
 }
 
+.hue-wheel {
+  container-type: inline-size;
+}
+
+.hue-wheel .hue-meter {
+  background-repeat: repeat-x;
+  background-size: 400cqi 100%;
+  background-position-x: calc(var(--fx-shift, var(--shift-from)) * 1cqi);
+}
+
 .hue-bead {
   position: absolute;
   top: 50%;
@@ -133,8 +195,8 @@ body {
   margin: -8px 0 0 -8px;
   border: 2.5px solid var(--cream);
   border-radius: 50%;
-  background: var(--meter, #e39a45);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--meter, #e39a45) 90%, transparent);
+  background: var(--lamp);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--lamp) 90%, transparent);
 }
 
 .zone-bar {

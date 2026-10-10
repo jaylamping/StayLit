@@ -151,7 +151,7 @@ function requireBool(value) {
 
 function createHost(options = {}) {
   const store = options.store || new WorkflowStore(options.dataDir || null);
-  const runtime = options.runtime || new EffectRuntime(options.sleep);
+  const runtime = options.runtime || new EffectRuntime(options.sleep, options.onFrame || null);
   let player = options.player;
   if (!player) {
     player = createLifxPlayer(store);

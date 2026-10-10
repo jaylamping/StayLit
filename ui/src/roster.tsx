@@ -3,7 +3,9 @@ import { memo, useState, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { sampleZones, wellFill, wellStyle } from "@/lib/well";
+import { zoneVar } from "@/lib/frames";
+import { cn } from "@/lib/utils";
+import { lampStyle, sampleIndexes, wellFill, wellStyle } from "@/lib/well";
 import { groupCount, groupPower, isCandle, useOffice, type Light } from "@/store";
 
 function meta(light: Light, driven: string | null) {
@@ -48,23 +50,24 @@ const LightRow = memo(function LightRow({ id, sub = false }: { id: string; sub?:
   const driven = useOffice((state) =>
     state.effect && state.effect.roomId === state.roomId && state.effect.lightIds.includes(id) ? state.effect.name : null,
   );
-  const drivenColor = useOffice((state) => (state.effect?.lightIds.includes(id) ? state.effect.accent : null));
+  const accent = useOffice((state) => (state.effect?.lightIds.includes(id) ? state.effect.accent : ""));
   const setPower = useOffice((state) => state.setPower);
   const selectLight = useOffice((state) => state.selectLight);
   if (!light) return null;
-  const fill = wellFill(light, drivenColor);
   const lit = Boolean(driven && light.on);
+  const fill = lit ? "var(--lamp)" : wellFill(light);
   const moving = driven === "Moving gradient" && light.ability === "multizone";
   const line = meta(light, driven);
+  const rowClass = sub ? "flex items-center gap-2.5 rounded-[10px] py-0.5 pr-2 pl-[50px]" : "flex items-center gap-2.5 rounded-[10px] px-2 py-1.5";
   return (
     <li>
       <div
-        className={sub ? "flex items-center gap-2.5 rounded-[10px] py-0.5 pr-2 pl-[50px]" : "flex items-center gap-2.5 rounded-[10px] px-2 py-1.5"}
-        style={rowStyle(lit ? fill : null, selected)}
+        className={lit ? `${rowClass} fx-lamp` : rowClass}
+        style={lit ? { ...lampStyle(light.id, accent || wellFill(light)), ...rowStyle(fill, false) } : rowStyle(null, selected)}
       >
         <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" onClick={() => selectLight(light.id)}>
           <span
-            className={sub ? "size-5 shrink-0 rounded-[6px]" : "size-8 shrink-0 rounded-[9px]"}
+            className={cn(sub ? "size-5 shrink-0 rounded-[6px]" : "size-8 shrink-0 rounded-[9px]", lit && "fx-zones")}
             style={wellStyle(light, fill, { driven: lit })}
           />
           <span className="min-w-0 flex-1">
@@ -83,8 +86,15 @@ const LightRow = memo(function LightRow({ id, sub = false }: { id: string; sub?:
             {notice ? <span className="block text-[11px] text-foreground">{notice}</span> : null}
             {light.zones && light.ability === "multizone" && !sub ? (
               <span className={moving ? "zone-bar moving" : "zone-bar"}>
-                {sampleZones(light.zones, 10).map((zone, index) => (
-                  <i key={`${light.id}-${index}`} style={{ background: zone, opacity: light.on ? 1 : 0.35 }} />
+                {sampleIndexes(light.zones.length, 10).map((zone) => (
+                  <i
+                    key={`${light.id}-${zone}`}
+                    className={lit ? "fx-zones" : undefined}
+                    style={{
+                      backgroundColor: lit ? `var(${zoneVar(light.id, zone)}, ${light.zones?.[zone]})` : light.zones?.[zone],
+                      opacity: light.on ? 1 : 0.35,
+                    }}
+                  />
                 ))}
               </span>
             ) : null}
@@ -107,17 +117,22 @@ const CandleFold = memo(function CandleFold({ ids }: { ids: string[] }) {
   const driven = useOffice((state) =>
     state.effect && state.effect.roomId === state.roomId && ids.some((id) => state.effect?.lightIds.includes(id)) ? state.effect.name : null,
   );
-  const drivenColor = useOffice((state) => (state.effect && ids.some((id) => state.effect?.lightIds.includes(id)) ? state.effect.accent : null));
+  const owned = useOffice(useShallow((state) => ids.filter((id) => state.effect?.lightIds.includes(id))));
+  const accent = useOffice((state) => state.effect?.accent ?? "");
   const setPower = useOffice((state) => state.setPower);
   const reachable = lights.filter((light) => !light.offline);
   const onCount = reachable.filter((light) => light.on).length;
-  const lit = Boolean(driven && onCount > 0);
-  const first = reachable[0] ?? lights[0];
-  const fill = first ? wellFill(first, drivenColor) : "#ffbe7a";
+  const first = reachable.find((light) => owned.includes(light.id)) ?? reachable[0] ?? lights[0];
+  const lit = Boolean(driven && first && owned.includes(first.id) && onCount > 0);
+  const fill = lit ? "var(--lamp)" : first ? wellFill(first) : "#ffbe7a";
+  const rowClass = "flex items-center gap-2.5 rounded-[10px] px-2 py-1.5";
   return (
     <>
       <li>
-        <div className="flex items-center gap-2.5 rounded-[10px] px-2 py-1.5" style={rowStyle(lit ? fill : null, selected && !open)}>
+        <div
+          className={lit ? `${rowClass} fx-lamp` : rowClass}
+          style={lit && first ? { ...lampStyle(first.id, accent || wellFill(first)), ...rowStyle(fill, false) } : rowStyle(null, selected && !open)}
+        >
           <button
             type="button"
             aria-expanded={open}
@@ -125,9 +140,20 @@ const CandleFold = memo(function CandleFold({ ids }: { ids: string[] }) {
             onClick={() => setOpen((value) => !value)}
           >
             <span className="flex w-8 shrink-0 gap-[3px]">
-              {lights.slice(0, 3).map((light) => (
-                <i key={light.id} className="h-8 flex-1 rounded-[5px]" style={wellStyle(light, wellFill(light, drivenColor), { driven: lit })} />
-              ))}
+              {lights.slice(0, 3).map((light) => {
+                const live = Boolean(driven && light.on && owned.includes(light.id));
+                return (
+                  <i
+                    key={light.id}
+                    className={cn("h-8 flex-1 rounded-[5px]", live && "fx-lamp")}
+                    style={
+                      live
+                        ? { ...lampStyle(light.id, accent || wellFill(light)), ...wellStyle(light, "var(--lamp)", { driven: true }) }
+                        : wellStyle(light, wellFill(light))
+                    }
+                  />
+                );
+              })}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium">

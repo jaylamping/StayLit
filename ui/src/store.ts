@@ -12,7 +12,8 @@ import {
   sentPaint,
   stagePaint,
 } from "@/lib/edits";
-import { lifx, sidecarAvailable } from "@/lib/lifx";
+import { clearFrames, lastFrames, paintFrame, type EffectFrame } from "@/lib/frames";
+import { lifx, onSidecarEvent, sidecarAvailable } from "@/lib/lifx";
 import { loadWindow, saveWindow } from "@/lib/remember";
 
 export type Light = {
@@ -298,13 +299,14 @@ export const useOffice = create<OfficeState>((set, get) => ({
   selectLight: (lightId) => set({ selectedLightId: lightId }),
   setBrightness: (lightId, brightness) => get().setLightPaint(lightId, { brightness }),
   setLightPaint: (lightId, patch) => {
-    const current = get().lights.find((light) => light.id === lightId);
-    if (!current || current.offline) return;
+    const found = get().lights.find((light) => light.id === lightId);
+    if (!found || found.offline) return;
     const starting = !pendingEdits.get(lightId)?.paint;
+    if (starting) haltEffect(found.roomId);
+    const current = get().lights.find((light) => light.id === lightId) ?? found;
     const generation = beginPaint(lightId, fieldsOf(current));
     const next = paintLight(current, patch);
     stagePaint(lightId, fieldsOf(next));
-    if (starting) haltEffect(current.roomId);
     quietly(() =>
       set({
         lights: get().lights.map((light) => (light.id === lightId ? next : light)),
@@ -399,7 +401,7 @@ export const useOffice = create<OfficeState>((set, get) => ({
     const effect: Effect = {
       name: "Color cycle",
       target: selection.target,
-      accent: "#e39a45",
+      accent: get().lights.find((light) => light.id === selection.lightIds[0])?.color ?? "",
       roomId,
       lightIds: selection.lightIds,
       kind: "color-cycle",
@@ -418,7 +420,7 @@ export const useOffice = create<OfficeState>((set, get) => ({
     const effect: Effect = {
       name: "Moving gradient",
       target: strip.name,
-      accent: "#e7b57a",
+      accent: strip.color,
       roomId,
       lightIds: [strip.id],
       kind: "moving-gradient",
@@ -586,7 +588,7 @@ function effectFromStatus(status: { running?: boolean; kind?: string; deviceId?:
     return {
       name: "Moving gradient",
       target: "Lightstrip",
-      accent: "#e7b57a",
+      accent: "",
       roomId,
       lightIds: status.deviceId ? [status.deviceId] : [],
       kind: "moving-gradient",
@@ -597,7 +599,7 @@ function effectFromStatus(status: { running?: boolean; kind?: string; deviceId?:
   return {
     name: "Color cycle",
     target: named ?? useOffice.getState().rooms.find((room) => room.id === roomId)?.name ?? "Office",
-    accent: "#e39a45",
+    accent: "",
     roomId,
     lightIds,
     kind: "color-cycle",
@@ -610,8 +612,69 @@ function liveEffect(effect: Effect, lights: Light[]): Effect {
   const lead = id ? lights.find((light) => light.id === id) : undefined;
   if (!lead) return effect;
   const target = effect.lightIds.length === 1 ? lead.name : effect.target;
-  if (lead.color === effect.accent && target === effect.target) return effect;
-  return { ...effect, accent: lead.color, target };
+  const accent = effect.accent || lead.color;
+  if (accent === effect.accent && target === effect.target) return effect;
+  return { ...effect, accent, target };
+}
+
+function effectKey(effect: Effect) {
+  return effect ? `${effect.kind}:${effect.roomId}:${effect.lightIds.join(",")}` : null;
+}
+
+function settleFrames() {
+  const frames = lastFrames();
+  if (frames.size === 0) return;
+  const lights = useOffice.getState().lights.map((light) => {
+    const frame = frames.get(light.id);
+    if (!frame || pendingEdits.get(light.id)?.paint) return light;
+    const color = lightSwatch({ ...frame, mode: "color" }, light.color);
+    return {
+      ...light,
+      mode: "color" as const,
+      hue: frame.hue,
+      saturation: frame.saturation,
+      kelvin: frame.kelvin,
+      brightness: frame.brightness,
+      color,
+      zones: frame.zones ? frame.zones.map((zone) => lightSwatch(zone, color)) : light.zones,
+    };
+  });
+  useOffice.setState({ lights });
+}
+
+let framedKey: string | null = null;
+useOffice.subscribe((state) => {
+  const key = effectKey(state.effect);
+  if (key === framedKey) return;
+  const ended = framedKey !== null;
+  framedKey = key;
+  if (ended) settleFrames();
+  if (key !== null) clearFrames();
+});
+
+function showFrame(frame: EffectFrame) {
+  const state = useOffice.getState();
+  const effect = state.effect;
+  if (!effect || effect.kind !== frame.kind) return;
+  if (effect.lightIds.length === 0) {
+    useOffice.setState({ effect: { ...effect, lightIds: frame.lights.map((light) => light.deviceId) } });
+    return;
+  }
+  const lights = frame.lights.filter((light) => effect.lightIds.includes(light.deviceId));
+  if (lights.length === 0) return;
+  const leadId = effect.lightIds[0];
+  paintFrame({ ...frame, lights }, leadId, state.lights.find((light) => light.id === leadId)?.hue);
+}
+
+let framesHeard = false;
+function hearFrames() {
+  if (framesHeard) return;
+  framesHeard = true;
+  void onSidecarEvent((payload) => {
+    if (!payload || typeof payload !== "object") return;
+    const message = payload as { event?: string; frame?: EffectFrame };
+    if (message.event === "effect.frame" && message.frame && Array.isArray(message.frame.lights)) showFrame(message.frame);
+  });
 }
 
 function releasePaint() {
@@ -624,7 +687,7 @@ function releasePaint() {
 
 function showDiscovered(devices: DeviceSnap[]) {
   const current = useOffice.getState();
-  const lights = mergeDevices(current.lights, devices);
+  const lights = mergeDevices(current.lights, devices, new Set(current.effect?.lightIds ?? []));
   const selectedLightId = lights.some((light) => light.id === current.selectedLightId) ? current.selectedLightId : null;
   const effect = liveEffect(current.effect, lights);
   const known = new Set(current.lights.map((light) => light.id));
@@ -639,6 +702,7 @@ function showDiscovered(devices: DeviceSnap[]) {
 let discoveryWatch: ReturnType<typeof setInterval> | undefined;
 
 export function openWindow() {
+  hearFrames();
   void lifx("effects.list").then((status) => {
     if (!status || typeof status !== "object") return;
     const effect = effectFromStatus(status as { running?: boolean; kind?: string; deviceId?: string | null }, useOffice.getState().roomId);
