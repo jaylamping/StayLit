@@ -9,6 +9,7 @@ export const meterBead = 0.38;
 const written = new Set<string>();
 const latest = new Map<string, FrameLight>();
 const hueWatchers = new Set<(hue: number) => void>();
+const lightWatchers = new Map<string, Set<(light: FrameLight) => void>>();
 let leadHue: number | null = null;
 
 export const lampVar = (id: string) => `--fx-${id}`;
@@ -35,6 +36,7 @@ export function paintFrame(frame: EffectFrame, leadId: string | undefined, leadS
     latest.set(light.deviceId, light);
     put(lampVar(light.deviceId), lightSwatch({ ...light, mode: "color" }));
     light.zones?.forEach((zone, index) => put(zoneVar(light.deviceId, index), lightSwatch(zone)));
+    lightWatchers.get(light.deviceId)?.forEach((watch) => watch(light));
   }
   const lead = frame.lights.find((light) => light.deviceId === leadId);
   if (!lead || lead.zones) return;
@@ -48,6 +50,20 @@ export function watchLeadHue(watch: (hue: number) => void) {
   return () => {
     hueWatchers.delete(watch);
   };
+}
+
+export function watchLight(id: string, watch: (light: FrameLight) => void) {
+  const watchers = lightWatchers.get(id) ?? new Set();
+  watchers.add(watch);
+  lightWatchers.set(id, watchers);
+  return () => {
+    watchers.delete(watch);
+    if (watchers.size === 0) lightWatchers.delete(id);
+  };
+}
+
+export function lastFrame(id: string) {
+  return latest.get(id) ?? null;
 }
 
 export function lastFrames() {

@@ -3,8 +3,9 @@ import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { hueHex } from "@/lib/devices";
-import { meterBead, meterShift, meterSpan, watchLeadHue } from "@/lib/frames";
+import { lastFrame, meterBead, meterShift, meterSpan, watchLeadHue, watchLight } from "@/lib/frames";
 import { lampStyle, liveZones, wellFill, wellStyle } from "@/lib/well";
+import { kelvinHex, kelvinRangeOf, whiteAt, whitesIn } from "@/lib/whites";
 import { cycleIntervalMs, cycleSelection, useOffice, type Light } from "@/store";
 
 const hueNames: [number, string][] = [
@@ -42,7 +43,6 @@ function hueName(hue: number) {
 const hueAt = (hue: number, position: number) => hue + meterSpan * (meterBead - position);
 const hueTrack = `linear-gradient(90deg, ${[0, 60, 120, 180, 240, 300, 360].map((hue) => hueHex(hue)).join(", ")})`;
 const hueWheel = `linear-gradient(90deg, ${Array.from({ length: 13 }, (_, index) => `${hueHex(360 - index * 30)} ${(index * 100) / 12}%`).join(", ")})`;
-const kelvinTrack = "linear-gradient(90deg, #ffb46b, #ffe4c8 50%, #e6eeff)";
 const idleGlow = "#e39a45";
 
 function lightMeta(light: Light, driven: string | null) {
@@ -195,22 +195,73 @@ const EffectBand = memo(function EffectBand() {
   );
 });
 
-const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
+function WhiteTiles({ light }: { light: Light }) {
+  const setLightPaint = useOffice((state) => state.setLightPaint);
+  const list = whitesIn(kelvinRangeOf(light.kelvinRange));
+  const current = whiteAt(light.kelvin, list);
+  return (
+    <div className="mt-1">
+      <div role="radiogroup" aria-label="White" className="grid grid-cols-[repeat(auto-fill,minmax(80px,1fr))] gap-[5px]">
+        {list.map((white) => {
+          const on = current?.kelvin === white.kelvin;
+          return (
+            <button
+              key={white.kelvin}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              aria-label={`${white.name} ${white.kelvin}K`}
+              className="flex h-10 flex-col items-start justify-between rounded-[8px] px-2 pt-1 pb-[3px] text-left text-[#2a1f16]"
+              style={{
+                background: kelvinHex(white.kelvin),
+                boxShadow: on ? "0 0 0 2px var(--background), 0 0 0 3.5px var(--foreground)" : undefined,
+              }}
+              onClick={() => setLightPaint(light.id, { mode: "white", kelvin: white.kelvin })}
+            >
+              <span className="text-[10.5px] leading-[1.1] font-medium tracking-[-0.01em]">{white.name}</span>
+              <span className="self-end text-[10px] leading-none tabular-nums opacity-65">{white.kelvin}K</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type Framed = { hue: number; saturation: number; brightness: number; jump: boolean };
+
+const PaintSliders = memo(function PaintSliders({ light, live }: { light: Light; live: boolean }) {
   const setLightPaint = useOffice((state) => state.setLightPaint);
   const frame = useRef(0);
-  const queued = useRef<{ hue?: number; saturation?: number; kelvin?: number; brightness?: number } | null>(null);
-  const [draft, setDraft] = useState<{ hue?: number; saturation?: number; kelvin?: number; brightness?: number }>({});
+  const queued = useRef<{ hue?: number; saturation?: number; brightness?: number } | null>(null);
+  const [draft, setDraft] = useState<{ hue?: number; saturation?: number; brightness?: number }>({});
+  const [framed, setFramed] = useState<Framed | null>(null);
   useEffect(() => {
     setDraft((current) => {
       const next = { ...current };
       if (next.hue === light.hue) delete next.hue;
       if (next.saturation === light.saturation) delete next.saturation;
-      if (next.kelvin === light.kelvin) delete next.kelvin;
       if (next.brightness === light.brightness) delete next.brightness;
       return next;
     });
-  }, [light.hue, light.saturation, light.kelvin, light.brightness]);
-  function queue(patch: { hue?: number; saturation?: number; kelvin?: number; brightness?: number }) {
+  }, [light.hue, light.saturation, light.brightness]);
+  useEffect(() => {
+    if (!live) {
+      setFramed(null);
+      return;
+    }
+    const seed = lastFrame(light.id);
+    setFramed(seed ? { hue: seed.hue, saturation: seed.saturation, brightness: seed.brightness, jump: true } : null);
+    return watchLight(light.id, (next) =>
+      setFramed((current) => ({
+        hue: next.hue,
+        saturation: next.saturation,
+        brightness: next.brightness,
+        jump: !current || Math.abs(next.hue - current.hue) > 180,
+      })),
+    );
+  }, [live, light.id]);
+  function queue(patch: { hue?: number; saturation?: number; brightness?: number }) {
     queued.current = { ...queued.current, ...patch };
     setDraft((current) => ({ ...current, ...patch }));
     if (frame.current) return;
@@ -221,24 +272,16 @@ const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
       if (next) setLightPaint(light.id, next);
     });
   }
-  const white = light.mode === "white";
-  const hue = draft.hue ?? light.hue ?? 0;
-  const saturation = draft.saturation ?? light.saturation ?? 0;
-  const kelvin = draft.kelvin ?? light.kelvin ?? 3800;
-  const brightness = draft.brightness ?? light.brightness;
+  const shown = live ? framed : null;
+  const easing = Boolean(shown && !shown.jump);
+  const color = live ? "var(--lamp)" : light.color;
+  const hue = shown?.hue ?? draft.hue ?? light.hue ?? 0;
+  const saturation = shown?.saturation ?? draft.saturation ?? light.saturation ?? 0;
+  const brightness = shown?.brightness ?? draft.brightness ?? light.brightness;
   return (
     <div>
-      {white ? (
-        <Slider
-          label="Kelvin"
-          value={kelvin}
-          min={2500}
-          max={9000}
-          color={light.color}
-          track={kelvinTrack}
-          display={`${Math.round(kelvin)}K`}
-          onValueChange={(value) => queue({ kelvin: value })}
-        />
+      {light.mode === "white" ? (
+        <WhiteTiles light={light} />
       ) : (
         <>
           <Slider
@@ -246,15 +289,17 @@ const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
             value={hue}
             min={0}
             max={360}
-            color={light.color}
+            color={color}
             track={hueTrack}
+            live={easing}
             display={`${Math.round(hue)}`}
             onValueChange={(value) => queue({ hue: value })}
           />
           <Slider
             label="Saturation"
             value={saturation}
-            color={light.color}
+            color={color}
+            live={easing}
             display={`${Math.round(saturation)}%`}
             onValueChange={(value) => queue({ saturation: value })}
           />
@@ -263,7 +308,8 @@ const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
       <Slider
         label="Brightness"
         value={brightness}
-        color={light.color}
+        color={color}
+        live={easing}
         display={`${Math.round(brightness)}%`}
         onValueChange={(value) => queue({ brightness: value })}
       />
@@ -314,11 +360,11 @@ const LightPanel = memo(function LightPanel({ id }: { id: string }) {
   const lit = Boolean(driven && light.on);
   const fill = lit ? "var(--lamp)" : wellFill(light);
   return (
-    <div>
+    <div className={lit ? "fx-lamp" : undefined} style={lit ? lampStyle(light.id, accent || wellFill(light)) : undefined}>
       <div className="mb-3.5 flex items-center gap-3">
         <span
-          className={lit ? "fx-lamp fx-zones size-11 shrink-0 rounded-[12px]" : "size-11 shrink-0 rounded-[12px]"}
-          style={lit ? { ...lampStyle(light.id, accent || wellFill(light)), ...wellStyle(light, fill, { driven: true, size: 44 }) } : wellStyle(light, fill, { size: 44 })}
+          className={lit ? "fx-zones size-11 shrink-0 rounded-[12px]" : "size-11 shrink-0 rounded-[12px]"}
+          style={wellStyle(light, fill, { driven: lit, size: 44 })}
         />
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-semibold tracking-[-0.01em]">{light.name}</div>
@@ -348,7 +394,7 @@ const LightPanel = memo(function LightPanel({ id }: { id: string }) {
           </button>
         </div>
       </div>
-      <PaintSliders light={light} />
+      <PaintSliders light={light} live={lit} />
       <div className="mt-[18px] flex items-center gap-3.5">
         <span className="text-xs font-medium text-muted">Group</span>
         <span className="inline-flex h-6 items-center rounded-full border border-border-strong px-[11px] text-xs font-medium">{groupName ?? "None"}</span>

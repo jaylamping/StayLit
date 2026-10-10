@@ -150,6 +150,13 @@ body {
   transition-property: --lamp, --z1, --z2, --z3, --z4, --z5, --z6, background-color, background-position;
 }
 
+.fx-slide > span:has(> [role="slider"]),
+.fx-slide .fx-range {
+  transition-property: left, right;
+  transition-duration: var(--fx-ms, 0ms);
+  transition-timing-function: linear;
+}
+
 .fx-band {
   position: relative;
   overflow: hidden;
