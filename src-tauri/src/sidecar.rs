@@ -137,6 +137,15 @@ fn read_stdout(stdout: std::process::ChildStdout, shared: Arc<Shared>) {
             }
         }
     }
+    fail_pending(&shared);
+}
+
+fn fail_pending(shared: &Shared) {
+    shared
+        .pending
+        .lock()
+        .expect("sidecar pending lock")
+        .clear();
 }
 
 fn sidecar_script() -> PathBuf {
@@ -150,15 +159,52 @@ fn sidecar_script() -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::Mutex as TestMutex;
+
+    static SIDECAR_ENV: TestMutex<()> = TestMutex::new(());
+
+    struct SidecarScriptGuard;
+
+    impl Drop for SidecarScriptGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("STAYLIT_SIDECAR");
+        }
+    }
 
     #[test]
     fn sidecar_answers_ping_over_stdio() {
+        let _env = SIDECAR_ENV.lock().expect("sidecar test lock");
         let dir = std::env::temp_dir().join(format!("staylit-ping-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let sidecar = Sidecar::spawn(&dir).expect("spawn sidecar");
         let result = sidecar.request("ping", json!({})).expect("ping");
         assert_eq!(result.get("pong").and_then(Value::as_bool), Some(true));
         let _ = sidecar.request("shutdown", json!({}));
+        sidecar.stop();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sidecar_fails_pending_when_stdout_closes() {
+        let _env = SIDECAR_ENV.lock().expect("sidecar test lock");
+        let dir = std::env::temp_dir().join(format!("staylit-die-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let script = dir.join("die.js");
+        std::fs::write(
+            &script,
+            "const readline = require('node:readline');\nreadline.createInterface({ input: process.stdin }).on('line', () => process.exit(0));\n",
+        )
+        .expect("script");
+        std::env::set_var("STAYLIT_SIDECAR", &script);
+        let _guard = SidecarScriptGuard;
+        let sidecar = Sidecar::spawn(&dir).expect("spawn sidecar");
+        let started = std::time::Instant::now();
+        let err = sidecar.request("ping", json!({})).expect_err("pending should fail");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "pending stayed blocked: {err}"
+        );
+        assert_ne!(err, "sidecar timed out");
         sidecar.stop();
         let _ = std::fs::remove_dir_all(&dir);
     }

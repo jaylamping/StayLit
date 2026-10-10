@@ -29,7 +29,7 @@ function numberIn(value, min, max, label, code = 'bad_color') {
 
 function normalizeColor(input) {
   if (!input || typeof input !== 'object') {
-    fail('Color is required');
+    throw new CommandError('bad_color', 'Color is required');
   }
   return {
     hue: numberIn(input.hue, LIMITS.hueMin, LIMITS.hueMax, 'hue'),

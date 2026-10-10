@@ -151,6 +151,19 @@ function renderControls() {
   }
 }
 
+function loginActionValue(login) {
+  if (!login || login.enabled === false || !login.action) {
+    return "off";
+  }
+  if (login.action.type === "savedState") {
+    return "look";
+  }
+  if (login.action.type === "effect" && login.action.effect && login.action.effect.kind) {
+    return login.action.effect.kind;
+  }
+  return "off";
+}
+
 function renderWorkflows() {
   const data = ui.workflows;
   if (!data) {
@@ -158,11 +171,15 @@ function renderWorkflows() {
   }
   const kelvin = document.querySelector("#logout-kelvin");
   const brightness = document.querySelector("#logout-brightness");
+  const loginAction = document.querySelector("#login-action");
   if (document.activeElement !== kelvin) {
     kelvin.value = data.logout.kelvin;
   }
   if (document.activeElement !== brightness) {
     brightness.value = data.logout.brightness;
+  }
+  if (document.activeElement !== loginAction) {
+    loginAction.value = loginActionValue(data.login);
   }
   renderControls();
 }

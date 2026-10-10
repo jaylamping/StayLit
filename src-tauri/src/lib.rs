@@ -5,6 +5,7 @@ mod sidecar;
 #[cfg(windows)]
 mod session_win;
 
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -186,14 +187,35 @@ fn quit_app(app: &AppHandle) {
     });
 }
 
+fn autostart_choice_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("autostart-user-choice")
+}
+
+fn autostart_choice_recorded(data_dir: &Path) -> bool {
+    autostart_choice_path(data_dir).is_file()
+}
+
+fn record_autostart_choice(data_dir: &Path) -> Result<(), String> {
+    if let Some(parent) = autostart_choice_path(data_dir).parent() {
+        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    std::fs::write(autostart_choice_path(data_dir), b"1").map_err(|err| err.to_string())
+}
+
+/// Turn autostart on only before the user has picked Start with Windows.
+fn should_apply_autostart_default(currently_enabled: bool, user_has_chosen: bool) -> bool {
+    !user_has_chosen && !currently_enabled
+}
+
 fn ensure_autostart_default(app: &AppHandle) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
+    let data_dir = app.path().app_data_dir().map_err(|err| err.to_string())?;
     let auto = app.autolaunch();
-    match auto.is_enabled() {
-        Ok(true) => Ok(()),
-        Ok(false) => auto.enable().map_err(|err| err.to_string()),
-        Err(err) => Err(err.to_string()),
+    let enabled = auto.is_enabled().map_err(|err| err.to_string())?;
+    if !should_apply_autostart_default(enabled, autostart_choice_recorded(&data_dir)) {
+        return Ok(());
     }
+    auto.enable().map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -238,8 +260,35 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     let auto = app.autolaunch();
     if enabled {
-        auto.enable().map_err(|err| err.to_string())
+        auto.enable().map_err(|err| err.to_string())?;
     } else {
-        auto.disable().map_err(|err| err.to_string())
+        auto.disable().map_err(|err| err.to_string())?;
+    }
+    let data_dir = app.path().app_data_dir().map_err(|err| err.to_string())?;
+    record_autostart_choice(&data_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autostart_default_runs_only_before_the_user_chooses() {
+        assert!(should_apply_autostart_default(false, false));
+        assert!(!should_apply_autostart_default(true, false));
+        assert!(!should_apply_autostart_default(false, true));
+        assert!(!should_apply_autostart_default(true, true));
+    }
+
+    #[test]
+    fn a_recorded_autostart_choice_blocks_the_default() {
+        let dir = std::env::temp_dir().join(format!("staylit-autostart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!autostart_choice_recorded(&dir));
+        assert!(should_apply_autostart_default(false, autostart_choice_recorded(&dir)));
+        record_autostart_choice(&dir).expect("record choice");
+        assert!(autostart_choice_recorded(&dir));
+        assert!(!should_apply_autostart_default(false, autostart_choice_recorded(&dir)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

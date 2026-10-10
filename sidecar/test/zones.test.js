@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { LifxPlayer } = require('../src/lifx-player');
-const { buildGradient, planZoneWrites } = require('../src/zones');
+const { buildGradient, normalizeColor, planZoneWrites } = require('../src/zones');
 
 test('gradient wraps hue the short way', () => {
   const zones = buildGradient(3, {
@@ -60,6 +60,19 @@ test('one zone send lists the write once and applies on the last call', async ()
   assert.equal(calls[1].duration, 120);
   assert.deepEqual(calls[2], calls[0]);
   assert.deepEqual(calls[3], calls[1]);
+});
+
+test('a missing color is a command error', () => {
+  assert.throws(() => normalizeColor(null), (err) => {
+    assert.equal(err.code, 'bad_color');
+    assert.equal(err.message, 'Color is required');
+    return true;
+  });
+  assert.throws(() => normalizeColor('white'), (err) => {
+    assert.equal(err.code, 'bad_color');
+    assert.equal(err.message, 'Color is required');
+    return true;
+  });
 });
 
 test('duplicate zone indexes are rejected', () => {
