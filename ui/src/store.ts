@@ -1,5 +1,17 @@
 import { create } from "zustand";
 import { lightSwatch, mergeDevices, type DeviceSnap } from "@/lib/devices";
+import {
+  beginPaint,
+  beginPower,
+  failPaint,
+  failPower,
+  finishPaint,
+  finishPower,
+  paintFields,
+  pendingEdits,
+  sentPaint,
+  stagePaint,
+} from "@/lib/edits";
 import { lifx, sidecarAvailable } from "@/lib/lifx";
 import { loadWindow, saveWindow } from "@/lib/remember";
 
@@ -10,7 +22,8 @@ export type Light = {
   on: boolean;
   offline: boolean;
   live: boolean;
-  kind: "color" | "white" | "strip";
+  ability: "color" | "white" | "multizone";
+  mode: "color" | "white";
   brightness: number;
   kelvin?: number;
   hue?: number;
@@ -130,11 +143,18 @@ function opened() {
   const lookByRoom: Record<string, string | null> = { office: null, ...saved?.lookByRoom };
   const lights = (saved?.lights ?? [])
     .filter((light) => !sampleIds.has(light.id))
-    .map((light) => ({
-      ...light,
-      live: light.live === true,
-      roomId: rooms.some((item) => item.id === light.roomId) ? light.roomId : "office",
-    }));
+    .map((light) => {
+      const savedLight = light as Light & { kind?: string };
+      const ability = savedLight.ability ?? (savedLight.kind === "strip" ? "multizone" : "color");
+      const mode = savedLight.mode ?? (savedLight.kind === "white" || ability === "white" ? "white" : "color");
+      return {
+        ...savedLight,
+        live: savedLight.live === true,
+        ability,
+        mode,
+        roomId: rooms.some((item) => item.id === savedLight.roomId) ? savedLight.roomId : "office",
+      };
+    });
   return {
     roomId: room.id,
     page,
@@ -147,39 +167,47 @@ function opened() {
   };
 }
 
-const powerGen = new Map<string, number>();
-const paintHold = new Map<string, Light>();
-const paintGen = new Map<string, number>();
 const paintTimer = new Map<string, ReturnType<typeof setTimeout>>();
+let quiet = false;
+let effectSync = 0;
+
+function quietly(run: () => void) {
+  quiet = true;
+  try {
+    run();
+  } finally {
+    quiet = false;
+  }
+}
+
+function fieldsOf(light: Light) {
+  return paintFields({
+    mode: light.mode,
+    hue: light.hue ?? 0,
+    saturation: light.saturation ?? 0,
+    kelvin: light.kelvin ?? 3800,
+    brightness: light.brightness,
+    color: light.color,
+  });
+}
 
 function paintLight(
   light: Light,
   patch: { mode?: "color" | "white"; hue?: number; saturation?: number; kelvin?: number; brightness?: number },
 ): Light {
-  let kind = light.kind;
-  let hue = patch.hue ?? light.hue;
-  let saturation = patch.saturation ?? light.saturation;
-  let kelvin = patch.kelvin ?? light.kelvin;
+  const mode = light.ability === "white" ? "white" : (patch.mode ?? light.mode);
+  const hue = patch.hue ?? light.hue ?? 0;
+  const saturation = patch.saturation ?? light.saturation ?? 0;
+  const kelvin = Math.min(9000, Math.max(2500, patch.kelvin ?? light.kelvin ?? 3800));
   const brightness = patch.brightness ?? light.brightness;
-  if (patch.mode === "white") {
-    kind = light.kind === "strip" ? "strip" : "white";
-    saturation = 0;
-    kelvin = Math.min(9000, Math.max(2500, kelvin ?? 3800));
-  } else if (patch.mode === "color") {
-    kind = light.kind === "strip" ? "strip" : "color";
-    hue = hue ?? 30;
-    saturation = (saturation ?? 0) < 2 ? 100 : saturation;
-  } else if (patch.kelvin !== undefined) {
-    kelvin = Math.min(9000, Math.max(2500, patch.kelvin));
-  }
   return {
     ...light,
-    kind,
+    mode,
     hue,
     saturation,
     kelvin,
     brightness,
-    color: lightSwatch({ hue, saturation, kelvin }, light.color),
+    color: lightSwatch({ mode, hue, saturation, kelvin }, light.color),
   };
 }
 
@@ -240,41 +268,46 @@ export const useOffice = create<OfficeState>((set, get) => ({
   setLightPaint: (lightId, patch) => {
     const current = get().lights.find((light) => light.id === lightId);
     if (!current || current.offline) return;
-    if (!paintHold.has(lightId)) paintHold.set(lightId, current);
-    const generation = (paintGen.get(lightId) ?? 0) + 1;
-    paintGen.set(lightId, generation);
+    const starting = !pendingEdits.get(lightId)?.paint;
+    const generation = beginPaint(lightId, fieldsOf(current));
     const next = paintLight(current, patch);
-    set({
-      lights: get().lights.map((light) => (light.id === lightId ? next : light)),
-      effect: get().effect?.lightIds.includes(lightId) ? null : get().effect,
-      notice: get().notice?.scope === lightId ? null : get().notice,
-    });
+    stagePaint(lightId, fieldsOf(next));
+    if (starting) haltEffect(current.roomId);
+    quietly(() =>
+      set({
+        lights: get().lights.map((light) => (light.id === lightId ? next : light)),
+        notice: get().notice?.scope === lightId ? null : get().notice,
+      }),
+    );
     const pending = paintTimer.get(lightId);
     if (pending) clearTimeout(pending);
     paintTimer.set(
       lightId,
       setTimeout(() => {
-        const light = get().lights.find((item) => item.id === lightId);
-        if (!light) return;
-        const white = (light.saturation ?? 0) < 2 || light.kind === "white";
-        void sendLive(light.live, () =>
+        const sent = sentPaint(lightId, generation);
+        if (!sent) return;
+        const white = sent.mode === "white";
+        void sendLive(current.live, () =>
           lifx("setColor", {
             deviceId: lightId,
-            brightness: light.brightness,
-            kelvin: light.kelvin ?? 3800,
-            hue: white ? 0 : (light.hue ?? 0),
-            saturation: white ? 0 : (light.saturation ?? 0),
+            brightness: sent.brightness,
+            kelvin: sent.kelvin,
+            hue: white ? 0 : sent.hue,
+            saturation: white ? 0 : sent.saturation,
           }),
         )
           .then(() => {
-            if (paintGen.get(lightId) === generation) paintHold.delete(lightId);
+            if (!finishPaint(lightId, generation)) return;
+            saveWindow(snapshot(get()));
+            syncEffect();
           })
           .catch((err: unknown) => {
-            if (paintGen.get(lightId) !== generation) return;
-            const held = paintHold.get(lightId);
-            paintHold.delete(lightId);
+            const latest = get().lights.find((item) => item.id === lightId);
+            if (!latest) return;
+            const restored = failPaint(latest, lightId, generation);
+            if (restored === latest) return;
             set({
-              lights: get().lights.map((item) => (item.id === lightId && held ? held : item)),
+              lights: get().lights.map((item) => (item.id === lightId ? restored : item)),
               notice: { scope: lightId, message: messageOf(err) },
             });
           });
@@ -284,65 +317,46 @@ export const useOffice = create<OfficeState>((set, get) => ({
   setPower: (lightId, on) => {
     const current = get().lights.find((light) => light.id === lightId);
     if (!current || current.offline) return;
-    const generation = (powerGen.get(lightId) ?? 0) + 1;
-    powerGen.set(lightId, generation);
-    const previous = current.on;
+    const generation = beginPower(lightId, current.on);
+    haltEffect(current.roomId);
     set({
       lights: patch(get().lights, [lightId], on),
-      effect: get().effect?.lightIds.includes(lightId) ? null : get().effect,
       notice: get().notice?.scope === lightId ? null : get().notice,
     });
-    void sendLive(current.live, () => lifx("setPower", { deviceId: lightId, on })).catch((err: unknown) => {
-      if (powerGen.get(lightId) !== generation) return;
-      set({
-        lights: patch(get().lights, [lightId], previous),
-        notice: { scope: lightId, message: messageOf(err) },
-      });
-    });
+    void sendPower(lightId, on, generation, current.live);
   },
   setGroupPower: (groupId, on) => {
     const group = get().groups.find((item) => item.id === groupId);
     if (!group) return;
-    const previous = get().lights.filter((light) => group.lightIds.includes(light.id)).map((light) => ({ id: light.id, on: light.on }));
-    const generation = (powerGen.get(groupId) ?? 0) + 1;
-    powerGen.set(groupId, generation);
+    const targets = get().lights.filter((light) => group.lightIds.includes(light.id) && !light.offline);
+    const room = get().rooms.find((item) => item.groupIds.includes(groupId));
+    if (room) haltEffect(room.id);
     set({
       lights: patch(get().lights, group.lightIds, on),
-      effect: get().effect && group.lightIds.some((id) => get().effect?.lightIds.includes(id)) ? null : get().effect,
       notice: get().notice?.scope === groupId ? null : get().notice,
     });
-    const liveIds = get().lights.filter((light) => group.lightIds.includes(light.id) && light.live && !light.offline).map((light) => light.id);
-    void Promise.all(liveIds.map((id) => lifx("setPower", { deviceId: id, on }))).catch((err: unknown) => {
-      if (powerGen.get(groupId) !== generation) return;
-      set({
-        lights: get().lights.map((light) => {
-          const held = previous.find((item) => item.id === light.id);
-          return held ? { ...light, on: held.on } : light;
-        }),
-        notice: { scope: groupId, message: messageOf(err) },
-      });
-    });
+    void settlePower(
+      targets.map((light) => ({ id: light.id, on, live: light.live, generation: beginPower(light.id, light.on) })),
+      groupId,
+    );
   },
   roomOff: () => {
     const room = get().rooms.find((item) => item.id === get().roomId);
     if (!room) return;
-    const ids = get().lights.filter((light) => light.roomId === room.id).map((light) => light.id);
-    const previous = get().lights.filter((light) => ids.includes(light.id)).map((light) => ({ id: light.id, on: light.on }));
+    const targets = get().lights.filter((light) => light.roomId === room.id && !light.offline);
+    haltEffect(room.id);
     set({
-      lights: patch(get().lights, ids, false),
-      effect: get().effect?.roomId === room.id ? null : get().effect,
+      lights: patch(
+        get().lights,
+        targets.map((light) => light.id),
+        false,
+      ),
       notice: null,
     });
-    const liveIds = get().lights.filter((light) => ids.includes(light.id) && light.live && !light.offline).map((light) => light.id);
-    void Promise.all(liveIds.map((id) => lifx("setPower", { deviceId: id, on: false }))).catch((err: unknown) => {
-      set({
-        lights: get().lights.map((light) => {
-          const held = previous.find((item) => item.id === light.id);
-          return held ? { ...light, on: held.on } : light;
-        }),
-        notice: { scope: room.id, message: messageOf(err) },
-      });
-    });
+    void settlePower(
+      targets.map((light) => ({ id: light.id, on: false, live: light.live, generation: beginPower(light.id, light.on) })),
+      room.id,
+    );
   },
   startCycle: () => {
     const roomId = get().roomId;
@@ -365,7 +379,7 @@ export const useOffice = create<OfficeState>((set, get) => ({
   startGradient: () => {
     const roomId = get().roomId;
     const previous = get().effect;
-    const strip = get().lights.find((light) => light.roomId === roomId && light.kind === "strip" && light.live && !light.offline);
+    const strip = get().lights.find((light) => light.roomId === roomId && light.ability === "multizone" && light.live && !light.offline);
     if (!strip) return;
     const effect: Effect = {
       name: "Moving gradient",
@@ -423,7 +437,80 @@ export const useOffice = create<OfficeState>((set, get) => ({
 }));
 
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
+function syncEffect() {
+  const ticket = ++effectSync;
+  void lifx("effects.list").then((status) => {
+    if (ticket !== effectSync) return;
+    if (!status || typeof status !== "object") return;
+    const effect = effectFromStatus(
+      status as { running?: boolean; kind?: string; deviceId?: string | null; deviceIds?: string[] | null },
+      useOffice.getState().roomId,
+    );
+    quietly(() => useOffice.setState({ effect }));
+  });
+}
+
+function haltEffect(roomId: string) {
+  const effect = useOffice.getState().effect;
+  if (!effect || effect.roomId !== roomId) return;
+  useOffice.setState({ effect: null });
+  void lifx("effects.stop").finally(() => syncEffect());
+}
+
+function sendPower(id: string, on: boolean, generation: number, live: boolean) {
+  void sendLive(live, () => lifx("setPower", { deviceId: id, on }))
+    .then(() => {
+      if (!finishPower(id, generation)) return;
+      saveWindow(snapshot(useOffice.getState()));
+      syncEffect();
+    })
+    .catch((err: unknown) => {
+      const before = failPower(id, generation);
+      if (before === null) return;
+      useOffice.setState({
+        lights: useOffice.getState().lights.map((light) => (light.id === id ? { ...light, on: before } : light)),
+        notice: { scope: id, message: messageOf(err) },
+      });
+    });
+}
+
+function settlePower(
+  jobs: { id: string; on: boolean; live: boolean; generation: number }[],
+  scope: string,
+) {
+  void Promise.all(
+    jobs.map(async (job) => {
+      try {
+        await sendLive(job.live, () => lifx("setPower", { deviceId: job.id, on: job.on }));
+        finishPower(job.id, job.generation);
+        return null;
+      } catch (err) {
+        const before = failPower(job.id, job.generation);
+        if (before === null) return null;
+        return { id: job.id, before, err };
+      }
+    }),
+  ).then((results) => {
+    const failed = results.flatMap((item) => (item ? [item] : []));
+    if (failed.length === 0) {
+      saveWindow(snapshot(useOffice.getState()));
+      syncEffect();
+      return;
+    }
+    const first = failed[0];
+    if (!first) return;
+    useOffice.setState({
+      lights: useOffice.getState().lights.map((light) => {
+        const miss = failed.find((item) => item.id === light.id);
+        return miss ? { ...light, on: miss.before } : light;
+      }),
+      notice: { scope, message: messageOf(first.err) },
+    });
+  });
+}
+
 useOffice.subscribe((state) => {
+  if (quiet) return;
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     try {
@@ -485,9 +572,11 @@ function effectFromStatus(status: { running?: boolean; kind?: string; deviceId?:
 
 function showDiscovered(devices: DeviceSnap[]) {
   const current = useOffice.getState();
-  const lights = mergeDevices(current.lights, devices);
+  const hold = new Set<string>();
+  if (current.selectedLightId && current.effect?.lightIds.includes(current.selectedLightId)) hold.add(current.selectedLightId);
+  const lights = mergeDevices(current.lights, devices, hold);
   const selectedLightId = lights.some((light) => light.id === current.selectedLightId) ? current.selectedLightId : null;
-  useOffice.setState({ lights, selectedLightId });
+  quietly(() => useOffice.setState({ lights, selectedLightId }));
 }
 
 let discoveryWatch: ReturnType<typeof setInterval> | undefined;

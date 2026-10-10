@@ -195,8 +195,11 @@ class LifxPlayer {
     if (snap.multizone === null) {
       try {
         const hardware = await callRetry((cb) => light.getHardwareVersion(cb));
+        const features = hardware && hardware.productFeatures;
         snap.productName = hardware && hardware.productName ? hardware.productName : null;
-        snap.multizone = Boolean(hardware && hardware.productFeatures && hardware.productFeatures.multizone);
+        snap.multizone = Boolean(features && features.multizone);
+        if (features && features.color === false) snap.hasColor = false;
+        else if (features && features.color === true) snap.hasColor = true;
       } catch (err) {
         snap.multizone = false;
         snap.error = err.message;

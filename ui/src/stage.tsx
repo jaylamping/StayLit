@@ -1,4 +1,4 @@
-import { memo, type CSSProperties } from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -7,9 +7,9 @@ import { cycleSelection, useOffice, type Light } from "@/store";
 
 function lightMeta(light: Light) {
   if (light.offline) return "Offline";
-  if (!light.on) return light.kind === "white" ? `${light.kelvin}K · off` : "Off";
-  if (light.kind === "white") return `${light.kelvin}K · ${light.brightness}%`;
-  if (light.kind === "strip") return "On";
+  if (!light.on) return light.mode === "white" ? `${light.kelvin}K · off` : "Off";
+  if (light.mode === "white") return `${light.kelvin}K · ${light.brightness}%`;
+  if (light.ability === "multizone") return "On";
   return `Color · ${light.brightness}%`;
 }
 
@@ -20,6 +20,80 @@ function HueMeter({ accent }: { accent: string }) {
     </div>
   );
 }
+
+const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
+  const setLightPaint = useOffice((state) => state.setLightPaint);
+  const frame = useRef(0);
+  const queued = useRef<{ hue?: number; saturation?: number; kelvin?: number; brightness?: number } | null>(null);
+  const [draft, setDraft] = useState<{ hue?: number; saturation?: number; kelvin?: number; brightness?: number }>({});
+  useEffect(() => {
+    setDraft((current) => {
+      const next = { ...current };
+      if (next.hue === light.hue) delete next.hue;
+      if (next.saturation === light.saturation) delete next.saturation;
+      if (next.kelvin === light.kelvin) delete next.kelvin;
+      if (next.brightness === light.brightness) delete next.brightness;
+      return next;
+    });
+  }, [light.hue, light.saturation, light.kelvin, light.brightness]);
+  function queue(patch: { hue?: number; saturation?: number; kelvin?: number; brightness?: number }) {
+    queued.current = { ...queued.current, ...patch };
+    setDraft((current) => ({ ...current, ...patch }));
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      const next = queued.current;
+      queued.current = null;
+      if (next) setLightPaint(light.id, next);
+    });
+  }
+  const white = light.mode === "white";
+  const hue = draft.hue ?? light.hue ?? 0;
+  const saturation = draft.saturation ?? light.saturation ?? 0;
+  const kelvin = draft.kelvin ?? light.kelvin ?? 3800;
+  const brightness = draft.brightness ?? light.brightness;
+  return (
+    <div className="mt-3 grid gap-3">
+      {white ? (
+        <Slider
+          label="Kelvin"
+          value={kelvin}
+          min={2500}
+          max={9000}
+          color={light.color}
+          display={`${Math.round(kelvin)}K`}
+          onValueChange={(value) => queue({ kelvin: value })}
+        />
+      ) : (
+        <>
+          <Slider
+            label="Hue"
+            value={hue}
+            min={0}
+            max={360}
+            color={light.color}
+            display={`${Math.round(hue)}`}
+            onValueChange={(value) => queue({ hue: value })}
+          />
+          <Slider
+            label="Saturation"
+            value={saturation}
+            color={light.color}
+            display={`${Math.round(saturation)}%`}
+            onValueChange={(value) => queue({ saturation: value })}
+          />
+        </>
+      )}
+      <Slider
+        label="Brightness"
+        value={brightness}
+        color={light.color}
+        display={`${Math.round(brightness)}%`}
+        onValueChange={(value) => queue({ brightness: value })}
+      />
+    </div>
+  );
+});
 
 const LightCard = memo(function LightCard({ id }: { id: string }) {
   const light = useOffice((state) => state.lights.find((item) => item.id === id) ?? null);
@@ -36,7 +110,7 @@ const LightCard = memo(function LightCard({ id }: { id: string }) {
   const assignRoom = useOffice((state) => state.assignRoom);
   const assignGroup = useOffice((state) => state.assignGroup);
   if (!light) return null;
-  const white = light.kind === "white" || (light.saturation ?? 0) < 2;
+  const white = light.mode === "white";
   return (
     <Card className="mt-5 max-w-[440px]">
       <div className="text-sm font-semibold tracking-tight">{light.name}</div>
@@ -51,52 +125,16 @@ const LightCard = memo(function LightCard({ id }: { id: string }) {
         }
       />
       <div className="mt-3 flex gap-1">
-        <Button variant={white ? "quiet" : "solid"} onClick={() => setLightPaint(light.id, { mode: "color" })}>
-          Color
-        </Button>
+        {light.ability === "white" ? null : (
+          <Button variant={white ? "quiet" : "solid"} onClick={() => setLightPaint(light.id, { mode: "color" })}>
+            Color
+          </Button>
+        )}
         <Button variant={white ? "solid" : "quiet"} onClick={() => setLightPaint(light.id, { mode: "white" })}>
           White
         </Button>
       </div>
-      <div className="mt-3 grid gap-3">
-        {white ? (
-          <Slider
-            label="Kelvin"
-            value={light.kelvin ?? 3800}
-            min={2500}
-            max={9000}
-            color={light.color}
-            display={`${light.kelvin ?? 3800}K`}
-            onValueChange={(value) => setLightPaint(light.id, { kelvin: value })}
-          />
-        ) : (
-          <>
-            <Slider
-              label="Hue"
-              value={light.hue ?? 0}
-              min={0}
-              max={360}
-              color={light.color}
-              display={`${Math.round(light.hue ?? 0)}`}
-              onValueChange={(value) => setLightPaint(light.id, { hue: value })}
-            />
-            <Slider
-              label="Saturation"
-              value={light.saturation ?? 0}
-              color={light.color}
-              display={`${Math.round(light.saturation ?? 0)}%`}
-              onValueChange={(value) => setLightPaint(light.id, { saturation: value })}
-            />
-          </>
-        )}
-        <Slider
-          label="Brightness"
-          value={light.brightness}
-          color={light.color}
-          display={`${light.brightness}%`}
-          onValueChange={(value) => setLightPaint(light.id, { brightness: value })}
-        />
-      </div>
+      <PaintSliders light={light} />
       <div className="mt-3 flex flex-wrap gap-1">
         {roomIds.map((roomId, index) => (
           <Button key={roomId} variant={roomId === light.roomId ? "solid" : "quiet"} onClick={() => assignRoom(light.id, roomId)}>
@@ -178,7 +216,7 @@ export const Stage = memo(function Stage() {
   const otherRoom = useOffice((state) => (state.effect && state.effect.roomId !== state.roomId ? state.rooms.find((room) => room.id === state.effect?.roomId)?.name ?? null : null));
   const setRoom = useOffice((state) => state.setRoom);
   const cycleTarget = useOffice((state) => cycleSelection(state).target);
-  const showGradient = useOffice((state) => state.lights.some((light) => light.roomId === state.roomId && light.kind === "strip"));
+  const showGradient = useOffice((state) => state.lights.some((light) => light.roomId === state.roomId && light.ability === "multizone"));
   const startCycle = useOffice((state) => state.startCycle);
   const startGradient = useOffice((state) => state.startGradient);
   const stopEffect = useOffice((state) => state.stopEffect);

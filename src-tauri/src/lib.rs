@@ -244,8 +244,11 @@ fn ensure_autostart_default(app: &AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn lifx_request(app: AppHandle, method: String, params: Option<Value>) -> Result<Value, String> {
-    send(&app, &method, params.unwrap_or_else(|| json!({})))
+async fn lifx_request(app: AppHandle, method: String, params: Option<Value>) -> Result<Value, String> {
+    let params = params.unwrap_or_else(|| json!({}));
+    tauri::async_runtime::spawn_blocking(move || send(&app, &method, params))
+        .await
+        .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]

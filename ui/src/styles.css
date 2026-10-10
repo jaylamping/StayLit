@@ -87,8 +87,6 @@ body {
   border-radius: 999px;
   background: var(--meter, #e39a45);
   box-shadow: 0 0 0 2px #f6f1ea;
-  animation: hue-bead 8s linear infinite;
-  will-change: transform;
 }
 
 .zone-bar {
@@ -104,30 +102,7 @@ body {
   border-radius: 1px;
 }
 
-.zone-bar.moving {
-  animation: zone-nudge 2.4s linear infinite;
-  will-change: transform;
-}
-
 .effect-zones {
   height: 16px;
-  width: 200%;
-  background: linear-gradient(90deg, #3a2418, #b8743c, #f3d7b4, #6e3d2a, #3a2418, #b8743c, #f3d7b4);
-  animation: zone-slide 2.4s linear infinite;
-  will-change: transform;
-}
-
-@keyframes hue-bead {
-  from { transform: translateX(0); }
-  to { transform: translateX(444px); }
-}
-
-@keyframes zone-nudge {
-  from { transform: translateX(0); }
-  to { transform: translateX(-8px); }
-}
-
-@keyframes zone-slide {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
+  background: linear-gradient(90deg, #3a2418, #b8743c, #f3d7b4, #6e3d2a, #3a2418);
 }

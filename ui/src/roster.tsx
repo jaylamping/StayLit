@@ -6,10 +6,10 @@ import { groupCount, groupPower, useOffice, type Light } from "@/store";
 
 function meta(light: Light, driven: string | null) {
   if (light.offline) return "Offline";
-  if (driven && light.on) return light.kind === "strip" ? driven : `${driven} · ${light.brightness}%`;
-  if (!light.on) return light.kind === "white" ? `${light.kelvin}K · off` : "Off";
-  if (light.kind === "white") return `${light.kelvin}K · ${light.brightness}%`;
-  if (light.kind === "strip") return "On";
+  if (driven && light.on) return light.ability === "multizone" && light.mode !== "white" ? driven : `${driven} · ${light.brightness}%`;
+  if (!light.on) return light.mode === "white" ? `${light.kelvin}K · off` : "Off";
+  if (light.mode === "white") return `${light.kelvin}K · ${light.brightness}%`;
+  if (light.ability === "multizone") return "On";
   return `Color · ${light.brightness}%`;
 }
 
@@ -26,7 +26,7 @@ const LightRow = memo(function LightRow({ id }: { id: string }) {
   const setPower = useOffice((state) => state.setPower);
   const selectLight = useOffice((state) => state.selectLight);
   if (!light) return null;
-  const moving = driven === "Moving gradient" && light.kind === "strip";
+  const moving = driven === "Moving gradient" && light.ability === "multizone";
   return (
     <li>
       <div

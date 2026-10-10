@@ -1,3 +1,4 @@
+import { heldPower, mergeHeld, pendingEdits, type PendingEdit } from "@/lib/edits";
 import type { Light } from "@/store";
 
 export type DeviceColor = {
@@ -15,6 +16,7 @@ export type DeviceSnap = {
   color?: DeviceColor | null;
   zones?: DeviceColor[] | null;
   multizone?: boolean | null;
+  hasColor?: boolean | null;
 };
 
 function channel(value: number) {
@@ -27,14 +29,17 @@ function kelvinHex(kelvin: number) {
   return `#${channel(255)}${channel(214 + t * 28)}${channel(170 + t * 70)}`;
 }
 
-export function lightSwatch(color: DeviceColor | null | undefined, fallback = "#d9d3cb") {
-  return colorHex(color, fallback);
+export function lightSwatch(
+  color: DeviceColor & { mode?: Light["mode"] } | null | undefined,
+  fallback = "#d9d3cb",
+) {
+  return colorHex(color, fallback, color?.mode === "color");
 }
 
-function colorHex(color: DeviceColor | null | undefined, fallback: string) {
+function colorHex(color: DeviceColor | null | undefined, fallback: string, forceHue = false) {
   if (!color) return fallback;
   const saturation = color.saturation ?? 0;
-  if (saturation < 2) return kelvinHex(color.kelvin ?? 3800);
+  if (!forceHue && saturation < 2) return kelvinHex(color.kelvin ?? 3800);
   const hue = ((color.hue ?? 0) % 360) / 60;
   const chroma = 1;
   const x = 1 - Math.abs((hue % 2) - 1);
@@ -51,79 +56,93 @@ function colorHex(color: DeviceColor | null | undefined, fallback: string) {
   return `#${mix(map[0])}${mix(map[1])}${mix(map[2])}`;
 }
 
-function applyDevice(light: Light, device: DeviceSnap): Light {
+export function abilityOf(device: { multizone?: boolean | null; hasColor?: boolean | null }): Light["ability"] {
+  if (device.multizone) return "multizone";
+  if (device.hasColor === false) return "white";
+  return "color";
+}
+
+function applyDevice(light: Light, device: DeviceSnap, edit: PendingEdit | undefined, holdPaint: boolean): Light {
+  const ability = abilityOf(device);
   const offline = device.online === false;
-  const on = device.power === true;
-  const color = colorHex(device.color, light.color);
+  const discoveredOn = device.power === true ? true : device.power === false ? false : null;
+  const mode = ability === "white" ? "white" : light.mode;
+  const hue = device.color?.hue ?? light.hue ?? 0;
+  const saturation = device.color?.saturation ?? light.saturation ?? 0;
+  const kelvin = device.color?.kelvin ?? light.kelvin ?? 3800;
   const brightness = device.color?.brightness ?? light.brightness;
-  const kelvin = device.color?.kelvin ?? light.kelvin;
+  const color = lightSwatch({ mode, hue, saturation, kelvin }, light.color);
   const zones = device.zones?.map((zone) => colorHex(zone, color));
-  const sameZones = (zones ?? light.zones)?.join() === light.zones?.join();
-  if (
-    light.live &&
-    light.name === (device.label || light.name) &&
-    light.offline === offline &&
-    light.on === on &&
-    light.color === color &&
-    light.brightness === brightness &&
-    light.kelvin === kelvin &&
-    light.hue === (device.color?.hue ?? light.hue) &&
-    light.saturation === (device.color?.saturation ?? light.saturation) &&
-    sameZones
-  ) {
-    return light;
-  }
-  return {
+  const incoming: Light = {
     ...light,
     name: device.label || light.name,
     live: true,
     offline,
-    on,
-    color,
-    brightness,
+    ability,
+    mode,
+    on: discoveredOn === null ? light.on : discoveredOn,
+    hue,
+    saturation,
     kelvin,
-    hue: device.color?.hue ?? light.hue,
-    saturation: device.color?.saturation ?? light.saturation,
+    brightness,
+    color,
     zones: zones ?? light.zones,
-    kind: device.multizone ? "strip" : light.kind,
   };
+  const held = mergeHeld(light, incoming, edit, holdPaint);
+  return held.on === light.on &&
+    held.color === light.color &&
+    held.brightness === light.brightness &&
+    held.mode === light.mode &&
+    held.hue === light.hue &&
+    held.saturation === light.saturation &&
+    held.kelvin === light.kelvin &&
+    held.name === light.name &&
+    held.offline === light.offline &&
+    held.ability === light.ability &&
+    (zones ?? light.zones)?.join() === light.zones?.join()
+    ? light
+    : { ...held, on: heldPower(light.on, discoveredOn, edit) };
 }
 
 export function lightsFromDevices(devices: DeviceSnap[], roomId: string): Light[] {
   return devices
     .map((device) => {
+      const ability = abilityOf(device);
+      const mode = ability === "white" ? "white" : "color";
       const saturation = device.color?.saturation ?? 0;
-      const kind = device.multizone ? "strip" : saturation < 2 ? "white" : "color";
-      const color = colorHex(device.color, "#d9d3cb");
+      const hue = device.color?.hue ?? 0;
+      const kelvin = device.color?.kelvin ?? 3800;
+      const color = lightSwatch({ mode, hue, saturation, kelvin }, "#d9d3cb");
       const zones = device.zones?.map((zone) => colorHex(zone, color));
       const light: Light = {
         id: device.id,
         name: device.label?.trim() || device.id,
         color,
-        on: device.power === true,
+        on: device.power === false ? false : true,
         offline: device.online === false,
         live: true,
-        kind,
+        ability,
+        mode,
         brightness: device.color?.brightness ?? 100,
-        kelvin: device.color?.kelvin ?? 3800,
-        hue: device.color?.hue ?? 0,
+        kelvin,
+        hue,
         saturation,
         roomId,
       };
-      if (kind === "strip" && zones?.length) light.zones = zones;
+      if (ability === "multizone" && zones?.length) light.zones = zones;
       return light;
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function mergeDevices(lights: Light[], devices: DeviceSnap[]) {
+export function mergeDevices(lights: Light[], devices: DeviceSnap[], holdPaintIds?: ReadonlySet<string>) {
   if (devices.length === 0) return lights;
   const seen = new Set<string>();
   const next = lights.map((light) => {
     const device = devices.find((item) => item.id === light.id);
     if (!device) return light.offline ? light : { ...light, offline: true };
     seen.add(light.id);
-    return applyDevice(light, device);
+    return applyDevice(light, device, pendingEdits.get(light.id), holdPaintIds?.has(light.id) ?? false);
   });
   for (const light of lightsFromDevices(devices, "office")) {
     if (!seen.has(light.id)) next.push(light);
