@@ -159,10 +159,10 @@ function renderWorkflows() {
   const kelvin = document.querySelector("#logout-kelvin");
   const brightness = document.querySelector("#logout-brightness");
   if (document.activeElement !== kelvin) {
-    kelvin.value = data.logout.state.color.kelvin;
+    kelvin.value = data.logout.kelvin;
   }
   if (document.activeElement !== brightness) {
-    brightness.value = data.logout.state.color.brightness;
+    brightness.value = data.logout.brightness;
   }
   renderControls();
 }
@@ -284,33 +284,48 @@ document.querySelector("#apply-gradient").addEventListener("click", () => {
   });
 });
 
-document.querySelector("#start-cycle").addEventListener("click", () => {
-  withDevice((device) => {
-    const color = controls();
-    return lifx("effects.start", {
+function effectSpec(kind, device) {
+  const color = controls();
+  if (kind === "color-cycle") {
+    return {
       kind: "color-cycle",
       deviceId: device.id,
       hue: color.hue,
       saturation: color.saturation,
       brightness: color.brightness,
       kelvin: color.kelvin,
-    });
-  });
-});
-
-document.querySelector("#start-gradient").addEventListener("click", () => {
-  withDevice((device) => {
-    const color = controls();
+    };
+  }
+  if (kind === "moving-gradient") {
     const fromHue = Number(document.querySelector("#from-hue").value);
     const toHue = Number(document.querySelector("#to-hue").value);
-    return lifx("effects.start", {
+    return {
       kind: "moving-gradient",
       deviceId: device.id,
       zoneCount: device.zones && device.zones.length ? device.zones.length : undefined,
-      from: { hue: fromHue, saturation: color.saturation, brightness: color.brightness, kelvin: color.kelvin },
-      to: { hue: toHue, saturation: color.saturation, brightness: color.brightness, kelvin: color.kelvin },
-    });
-  });
+      from: {
+        hue: fromHue,
+        saturation: color.saturation,
+        brightness: color.brightness,
+        kelvin: color.kelvin,
+      },
+      to: {
+        hue: toHue,
+        saturation: color.saturation,
+        brightness: color.brightness,
+        kelvin: color.kelvin,
+      },
+    };
+  }
+  throw new Error(`Unknown effect: ${kind}`);
+}
+
+document.querySelector("#start-cycle").addEventListener("click", () => {
+  withDevice((device) => lifx("effects.start", effectSpec("color-cycle", device)));
+});
+
+document.querySelector("#start-gradient").addEventListener("click", () => {
+  withDevice((device) => lifx("effects.start", effectSpec("moving-gradient", device)));
 });
 
 document.querySelector("#stop-effect").addEventListener("click", async () => {
@@ -337,33 +352,7 @@ document.querySelector("#save-login").addEventListener("click", async () => {
       setStatus("Select a light for the login effect.");
       return;
     } else {
-      const color = controls();
-      const effect = choice === "color-cycle"
-        ? {
-          kind: "color-cycle",
-          deviceId: device.id,
-          hue: color.hue,
-          saturation: color.saturation,
-          brightness: color.brightness,
-          kelvin: color.kelvin,
-        }
-        : {
-          kind: "moving-gradient",
-          deviceId: device.id,
-          zoneCount: device.zones && device.zones.length ? device.zones.length : undefined,
-          from: {
-            hue: Number(document.querySelector("#from-hue").value),
-            saturation: color.saturation,
-            brightness: color.brightness,
-            kelvin: color.kelvin,
-          },
-          to: {
-            hue: Number(document.querySelector("#to-hue").value),
-            saturation: color.saturation,
-            brightness: color.brightness,
-            kelvin: color.kelvin,
-          },
-        };
+      const effect = effectSpec(choice, device);
       await lifx("workflows.setLogin", { enabled: true, action: { type: "effect", effect } });
     }
     setStatus("Login action saved. It runs when StayLit starts with the session.");
@@ -389,7 +378,7 @@ document.querySelector("#save-logout").addEventListener("click", async () => {
 
 document.querySelector("#run-logout").addEventListener("click", async () => {
   try {
-    await invoke("session_end");
+    await lifx("session.event", { event: "session-logout" });
     setStatus("Logout white queued. Hosted effects are stopped.");
     await refresh();
   } catch (err) {

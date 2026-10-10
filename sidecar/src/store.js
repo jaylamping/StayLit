@@ -4,9 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const { CommandError } = require('./protocol');
 const {
-  cloneLogoutState,
+  DEFAULT_LOGOUT,
   normalizeLogin,
-  normalizeLogoutState,
+  normalizeLogout,
   normalizeSavedState
 } = require('./workflows');
 
@@ -16,9 +16,9 @@ class WorkflowStore {
     this.loadError = null;
     this.data = {
       version: 1,
-      states: { 'logout-white': cloneLogoutState() },
+      states: {},
       login: { enabled: false, action: null },
-      logout: { enabled: true, stateId: 'logout-white' },
+      logout: { enabled: true, ...DEFAULT_LOGOUT },
       addresses: {}
     };
     this.load();
@@ -42,20 +42,23 @@ class WorkflowStore {
         ? parsed.addresses
         : {};
       this.data.login = normalizeLogin(parsed.login);
-      this.data.states = { 'logout-white': cloneLogoutState() };
+      this.data.states = {};
       const states = parsed.states || {};
+      const legacyLogout = states['logout-white'];
       Object.keys(states).forEach((id) => {
         if (id === 'logout-white') {
-          const source = states[id].color || states[id];
-          this.data.states[id] = normalizeLogoutState({
-            kelvin: source.kelvin,
-            brightness: source.brightness
-          });
           return;
         }
         this.data.states[id] = normalizeSavedState(states[id]);
       });
-      this.data.logout.enabled = !(parsed.logout && parsed.logout.enabled === false);
+      const legacySource = legacyLogout && (legacyLogout.color || legacyLogout);
+      const logoutSource = parsed.logout && parsed.logout.kelvin !== undefined
+        ? parsed.logout
+        : legacySource;
+      this.data.logout = {
+        enabled: !(parsed.logout && parsed.logout.enabled === false),
+        ...normalizeLogout(logoutSource || {})
+      };
     } catch (err) {
       this.loadError = err.message;
     }
@@ -70,8 +73,11 @@ class WorkflowStore {
     fs.writeFileSync(file, JSON.stringify(this.data, null, 2));
   }
 
-  logoutState() {
-    return this.data.states['logout-white'];
+  logoutPreset() {
+    return {
+      kelvin: this.data.logout.kelvin,
+      brightness: this.data.logout.brightness
+    };
   }
 
   logoutTrigger() {
@@ -103,8 +109,11 @@ class WorkflowStore {
   }
 
   setLogout(patch) {
-    this.data.states['logout-white'] = normalizeLogoutState(patch || {});
-    this.data.logout.enabled = !patch || patch.enabled !== false;
+    const source = patch || {};
+    this.data.logout = {
+      enabled: source.enabled !== false,
+      ...normalizeLogout(source)
+    };
     this.save();
     return this.snapshot();
   }
@@ -128,7 +137,7 @@ class WorkflowStore {
   snapshot() {
     return {
       login: this.data.login,
-      logout: { ...this.data.logout, state: this.logoutState() },
+      logout: { ...this.data.logout },
       states: this.data.states,
       addresses: this.data.addresses,
       loadError: this.loadError

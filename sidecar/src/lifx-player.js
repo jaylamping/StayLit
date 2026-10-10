@@ -36,25 +36,27 @@ function normalizeLibraryColor(color) {
   });
 }
 
-async function readZones(light) {
-  const first = await callRetry((cb) => light.getColorZones(0, 0, cb));
-  const count = first && first.count ? first.count : 0;
-  if (count <= 0) {
+function zoneColors(color) {
+  if (Array.isArray(color)) {
+    return color;
+  }
+  if (!color) {
     return [];
   }
-  if (count === 1) {
-    return [{ index: 0, ...normalizeLibraryColor(first.color) }];
+  return [color];
+}
+
+async function readZones(light) {
+  const probe = await callRetry((cb) => light.getColorZones(0, 0, cb));
+  const count = probe && probe.count ? probe.count : 0;
+  if (count <= 0) {
+    return [];
   }
   const zones = [];
   for (let start = 0; start < count; start += 8) {
     const end = Math.min(count - 1, start + 7);
-    if (start === end) {
-      const one = await callRetry((cb) => light.getColorZones(start, start, cb));
-      zones.push({ index: start, ...normalizeLibraryColor(one.color) });
-      continue;
-    }
-    const multi = await callRetry((cb) => light.getColorZones(start, end, cb));
-    const colors = multi.color || [];
+    const chunk = await callRetry((cb) => light.getColorZones(start, end, cb));
+    const colors = zoneColors(chunk && chunk.color);
     const span = end - start + 1;
     for (let offset = 0; offset < span; offset += 1) {
       if (!colors[offset]) {
@@ -64,6 +66,25 @@ async function readZones(light) {
     }
   }
   return zones;
+}
+
+function sendZoneWrite(light, write, wait) {
+  const send = (cb) => light.colorZones(
+    write.startIndex,
+    write.endIndex,
+    write.hue,
+    write.saturation,
+    write.brightness,
+    write.kelvin,
+    write.durationMs,
+    write.apply,
+    cb
+  );
+  if (wait) {
+    return callRetry(send);
+  }
+  send();
+  return Promise.resolve();
 }
 
 class LifxPlayer {
@@ -221,32 +242,7 @@ class LifxPlayer {
   async applyZoneWrites({ deviceId, writes, wait }) {
     const light = this.requireLight(deviceId);
     for (let i = 0; i < writes.length; i += 1) {
-      const write = writes[i];
-      const send = (cb) => light.colorZones(
-        write.startIndex,
-        write.endIndex,
-        write.hue,
-        write.saturation,
-        write.brightness,
-        write.kelvin,
-        write.durationMs,
-        write.apply,
-        cb
-      );
-      if (wait) {
-        await callRetry(send);
-      } else {
-        light.colorZones(
-          write.startIndex,
-          write.endIndex,
-          write.hue,
-          write.saturation,
-          write.brightness,
-          write.kelvin,
-          write.durationMs,
-          write.apply
-        );
-      }
+      await sendZoneWrite(light, writes[i], wait);
     }
     const snap = this.snapshots.get(deviceId);
     if (snap) {

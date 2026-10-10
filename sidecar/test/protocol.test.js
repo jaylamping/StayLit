@@ -6,37 +6,10 @@ const { parseRequest } = require('../src/protocol');
 const { Host } = require('../src/host');
 const { EffectRuntime } = require('../src/effects');
 const { WorkflowStore } = require('../src/store');
-
-function fakePlayer() {
-  const calls = [];
-  return {
-    calls,
-    async listDevices() {
-      return [{ id: 'strip' }];
-    },
-    async deviceIds() {
-      return ['strip'];
-    },
-    async setPower(args) {
-      calls.push(args);
-    },
-    async setColor(args) {
-      calls.push(args);
-    },
-    async applyZoneWrites(args) {
-      calls.push(args);
-    },
-    async getZones() {
-      return [];
-    },
-    async allOff(args) {
-      calls.push(args);
-    }
-  };
-}
+const { fakePlayer } = require('./support');
 
 function testHost() {
-  const player = fakePlayer();
+  const player = fakePlayer({ devices: [{ id: 'strip' }], zones: [] });
   const host = new Host(player, new WorkflowStore(null), new EffectRuntime());
   return { host, player };
 }

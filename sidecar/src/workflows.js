@@ -1,24 +1,14 @@
 'use strict';
 
 const { CommandError } = require('./protocol');
-const { createEffect } = require('./effects');
+const { createEffect, normalizeEffectSpec } = require('./effects');
 const { normalizeColor, planZoneWrites } = require('./zones');
 
 const PC_EVENTS = ['session-login', 'session-logout'];
 
-const DEFAULT_LOGOUT_STATE = {
-  id: 'logout-white',
-  name: 'Logout white',
-  applyTo: 'all',
-  power: true,
-  durationMs: 0,
-  color: {
-    hue: 0,
-    saturation: 0,
-    brightness: 100,
-    kelvin: 3800
-  },
-  zones: null
+const DEFAULT_LOGOUT = {
+  kelvin: 3800,
+  brightness: 100
 };
 
 function assertEvent(event) {
@@ -28,43 +18,25 @@ function assertEvent(event) {
   return event;
 }
 
-function cloneLogoutState() {
-  return {
-    ...DEFAULT_LOGOUT_STATE,
-    color: { ...DEFAULT_LOGOUT_STATE.color }
-  };
-}
-
-function normalizeLogoutState(input) {
-  const base = cloneLogoutState();
-  if (!input || typeof input !== 'object') {
-    return base;
-  }
-  const kelvin = input.kelvin === undefined ? base.color.kelvin : input.kelvin;
-  const brightness = input.brightness === undefined ? base.color.brightness : input.brightness;
+function normalizeLogout(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const kelvin = source.kelvin === undefined ? DEFAULT_LOGOUT.kelvin : source.kelvin;
+  const brightness = source.brightness === undefined ? DEFAULT_LOGOUT.brightness : source.brightness;
   if (typeof kelvin !== 'number' || kelvin < 3500 || kelvin > 4000) {
     throw new CommandError('bad_logout', 'Logout white kelvin must be from 3500 to 4000');
   }
   if (typeof brightness !== 'number' || brightness < 1 || brightness > 100) {
     throw new CommandError('bad_logout', 'Logout white brightness must be from 1 to 100');
   }
-  base.color.kelvin = Math.round(kelvin);
-  base.color.brightness = Math.round(brightness);
-  base.color.hue = 0;
-  base.color.saturation = 0;
-  base.power = true;
-  base.durationMs = 0;
-  base.applyTo = 'all';
-  base.zones = null;
-  return base;
+  return {
+    kelvin: Math.round(kelvin),
+    brightness: Math.round(brightness)
+  };
 }
 
 function normalizeSavedState(input) {
   if (!input || typeof input !== 'object') {
     throw new CommandError('bad_state', 'Saved state is required');
-  }
-  if (input.id === 'logout-white') {
-    return normalizeLogoutState(input.color || input);
   }
   if (typeof input.id !== 'string' || input.id.length === 0) {
     throw new CommandError('bad_state', 'Saved state id is required');
@@ -118,25 +90,11 @@ function normalizeLogin(input) {
     };
   }
   if (input.action.type === 'effect') {
-    const effect = createEffect(input.action.effect);
     return {
       enabled: true,
       action: {
         type: 'effect',
-        effect: {
-          kind: effect.kind,
-          deviceId: effect.deviceId,
-          intervalMs: effect.intervalMs,
-          durationMs: effect.durationMs,
-          step: effect.step,
-          hue: effect.hue,
-          saturation: effect.saturation,
-          brightness: effect.brightness,
-          kelvin: effect.kelvin,
-          from: effect.from,
-          to: effect.to,
-          zoneCount: effect.zoneCount
-        }
+        effect: normalizeEffectSpec(input.action.effect)
       }
     };
   }
@@ -153,6 +111,35 @@ function resolveTargets(state, devices) {
     }));
   }
   return state.targets;
+}
+
+async function applyLogoutWhite(player, preset, options = {}) {
+  const wait = options.wait !== false;
+  const devices = await player.listDevices();
+  const errors = [];
+  for (let i = 0; i < devices.length; i += 1) {
+    const deviceId = devices[i].id;
+    try {
+      await player.setPower({
+        deviceId,
+        on: true,
+        durationMs: 0,
+        wait
+      });
+      await player.setColor({
+        deviceId,
+        hue: 0,
+        saturation: 0,
+        brightness: preset.brightness,
+        kelvin: preset.kelvin,
+        durationMs: 0,
+        wait
+      });
+    } catch (err) {
+      errors.push({ deviceId, message: err.message });
+    }
+  }
+  return { targets: devices.length, errors };
 }
 
 async function applySavedState(player, state, options = {}) {
@@ -205,12 +192,12 @@ async function handleSessionEvent(ctx, eventName) {
     if (!trigger.enabled) {
       return { event, effects: 'stopped', applied: null };
     }
-    const state = ctx.store.logoutState();
-    const applied = await applySavedState(ctx.player, state, { wait: false });
+    const preset = ctx.store.logoutPreset();
+    const result = await applyLogoutWhite(ctx.player, preset, { wait: false });
     if (typeof ctx.player.flush === 'function') {
       await ctx.player.flush();
     }
-    return { event, effects: 'stopped', applied: state.id, result: applied };
+    return { event, effects: 'stopped', applied: preset, result };
   }
   if (event === 'session-login') {
     const trigger = ctx.store.loginTrigger();
@@ -235,12 +222,12 @@ async function handleSessionEvent(ctx, eventName) {
 
 module.exports = {
   PC_EVENTS,
-  DEFAULT_LOGOUT_STATE,
+  DEFAULT_LOGOUT,
   assertEvent,
-  cloneLogoutState,
-  normalizeLogoutState,
+  normalizeLogout,
   normalizeSavedState,
   normalizeLogin,
+  applyLogoutWhite,
   applySavedState,
   handleSessionEvent
 };

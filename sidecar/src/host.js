@@ -30,6 +30,9 @@ class Host {
   }
 
   async dispatch(method, params) {
+    if (writesBulbs(method)) {
+      this.runtime.stopAll();
+    }
     switch (method) {
       case 'ping':
         return { pong: true };
@@ -38,7 +41,6 @@ class Host {
       case 'refresh':
         return { devices: await this.player.refresh() };
       case 'setPower':
-        this.runtime.stopAll();
         await this.player.setPower({
           deviceId: requireDevice(params.deviceId),
           on: requireBool(params.on),
@@ -47,7 +49,6 @@ class Host {
         });
         return { ok: true };
       case 'setColor':
-        this.runtime.stopAll();
         await this.player.setColor({
           deviceId: requireDevice(params.deviceId),
           ...normalizeColor(params),
@@ -58,13 +59,10 @@ class Host {
       case 'getZones':
         return { zones: await this.player.getZones(requireDevice(params.deviceId)) };
       case 'setZones':
-        this.runtime.stopAll();
         return this.writeZones(requireDevice(params.deviceId), params.zones, params.durationMs);
       case 'setGradient':
-        this.runtime.stopAll();
         return this.writeGradient(params);
       case 'allOff':
-        this.runtime.stopAll();
         await this.player.allOff({
           durationMs: normalizeDuration(params.durationMs, 0),
           wait: true
@@ -124,6 +122,19 @@ class Host {
   }
 }
 
+function writesBulbs(method) {
+  switch (method) {
+    case 'setPower':
+    case 'setColor':
+    case 'setZones':
+    case 'setGradient':
+    case 'allOff':
+      return true;
+    default:
+      return false;
+  }
+}
+
 function requireDevice(deviceId) {
   if (typeof deviceId !== 'string' || deviceId.length === 0) {
     throw new CommandError('bad_device', 'deviceId is required');
@@ -140,7 +151,7 @@ function requireBool(value) {
 
 function createHost(options = {}) {
   const store = options.store || new WorkflowStore(options.dataDir || null);
-  const runtime = options.runtime || new EffectRuntime(options.schedule, options.clear);
+  const runtime = options.runtime || new EffectRuntime(options.sleep);
   let player = options.player;
   if (!player) {
     player = createLifxPlayer(store);

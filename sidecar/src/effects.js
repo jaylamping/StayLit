@@ -1,57 +1,78 @@
 'use strict';
 
 const { CommandError } = require('./protocol');
-const { buildGradient, normalizeColor, normalizeDuration, planZoneWrites } = require('./zones');
+const { buildGradient, normalizeColor, numberIn, planZoneWrites } = require('./zones');
 
 const EFFECT_KINDS = ['color-cycle', 'moving-gradient'];
 
-function createEffect(spec) {
+function effectNumber(value, min, max, label) {
+  return numberIn(value, min, max, label, 'bad_effect');
+}
+
+function normalizeEffectSpec(spec) {
   if (!spec || typeof spec !== 'object') {
     throw new CommandError('bad_effect', 'Effect spec is required');
   }
   if (spec.kind === 'color-cycle') {
-    return createColorCycle(spec);
+    return {
+      kind: 'color-cycle',
+      deviceId: spec.deviceId === undefined || spec.deviceId === null ? null : String(spec.deviceId),
+      intervalMs: Math.max(50, spec.intervalMs === undefined ? 1000 : effectNumber(spec.intervalMs, 0, 60000, 'intervalMs')),
+      durationMs: spec.durationMs === undefined ? 800 : effectNumber(spec.durationMs, 0, 60000, 'durationMs'),
+      step: spec.step === undefined ? 15 : effectNumber(spec.step, 1, 360, 'step'),
+      hue: spec.hue === undefined ? 0 : effectNumber(spec.hue, 0, 360, 'hue'),
+      saturation: spec.saturation === undefined ? 100 : effectNumber(spec.saturation, 0, 100, 'saturation'),
+      brightness: spec.brightness === undefined ? 80 : effectNumber(spec.brightness, 0, 100, 'brightness'),
+      kelvin: spec.kelvin === undefined ? 3500 : effectNumber(spec.kelvin, 1500, 9000, 'kelvin')
+    };
   }
   if (spec.kind === 'moving-gradient') {
-    return createMovingGradient(spec);
+    if (!spec.deviceId) {
+      throw new CommandError('bad_effect', 'Moving gradient needs a deviceId');
+    }
+    const zoneCount = spec.zoneCount === undefined || spec.zoneCount === null ? null : spec.zoneCount;
+    if (zoneCount !== null && (!Number.isInteger(zoneCount) || zoneCount < 1 || zoneCount > 256)) {
+      throw new CommandError('bad_effect', 'zoneCount must be an integer from 1 to 256');
+    }
+    return {
+      kind: 'moving-gradient',
+      deviceId: String(spec.deviceId),
+      from: requireColor(spec.from),
+      to: requireColor(spec.to),
+      zoneCount,
+      intervalMs: Math.max(50, spec.intervalMs === undefined ? 1000 : effectNumber(spec.intervalMs, 0, 60000, 'intervalMs')),
+      durationMs: spec.durationMs === undefined ? 400 : effectNumber(spec.durationMs, 0, 60000, 'durationMs')
+    };
   }
   throw new CommandError('bad_effect', `Unknown effect kind: ${spec.kind}`);
 }
 
+function requireColor(input) {
+  return normalizeColor(input);
+}
+
+function createEffect(spec) {
+  const data = normalizeEffectSpec(spec);
+  if (data.kind === 'color-cycle') {
+    return createColorCycle(data);
+  }
+  if (data.kind === 'moving-gradient') {
+    return createMovingGradient(data);
+  }
+  throw new CommandError('bad_effect', `Unknown effect kind: ${data.kind}`);
+}
+
 function createColorCycle(spec) {
-  const deviceId = spec.deviceId === undefined || spec.deviceId === null
-    ? null
-    : String(spec.deviceId);
   return {
-    kind: 'color-cycle',
-    deviceId,
-    intervalMs: Math.max(50, spec.intervalMs === undefined ? 1000 : normalizeDuration(spec.intervalMs, 1000)),
-    durationMs: normalizeDuration(spec.durationMs, 800),
-    step: spec.step === undefined ? 15 : normalizeDuration(spec.step, 15) || 15,
-    hue: spec.hue === undefined ? 0 : normalizeColor({
-      hue: spec.hue,
-      saturation: 0,
-      brightness: 0,
-      kelvin: 3500
-    }).hue,
-    saturation: spec.saturation === undefined ? 100 : normalizeColor({
-      hue: 0,
-      saturation: spec.saturation,
-      brightness: 0,
-      kelvin: 3500
-    }).saturation,
-    brightness: spec.brightness === undefined ? 80 : normalizeColor({
-      hue: 0,
-      saturation: 0,
-      brightness: spec.brightness,
-      kelvin: 3500
-    }).brightness,
-    kelvin: spec.kelvin === undefined ? 3500 : normalizeColor({
-      hue: 0,
-      saturation: 0,
-      brightness: 0,
-      kelvin: spec.kelvin
-    }).kelvin,
+    kind: spec.kind,
+    deviceId: spec.deviceId,
+    intervalMs: spec.intervalMs,
+    durationMs: spec.durationMs,
+    step: spec.step,
+    hue: spec.hue,
+    saturation: spec.saturation,
+    brightness: spec.brightness,
+    kelvin: spec.kelvin,
     async tick(player) {
       const hue = this.hue;
       this.hue = (this.hue + this.step) % 360;
@@ -72,24 +93,15 @@ function createColorCycle(spec) {
 }
 
 function createMovingGradient(spec) {
-  if (!spec.deviceId) {
-    throw new CommandError('bad_effect', 'Moving gradient needs a deviceId');
-  }
-  const from = normalizeColor(spec.from);
-  const to = normalizeColor(spec.to);
-  const zoneCount = spec.zoneCount === undefined ? null : spec.zoneCount;
-  if (zoneCount !== null && (!Number.isInteger(zoneCount) || zoneCount < 1 || zoneCount > 256)) {
-    throw new CommandError('bad_effect', 'zoneCount must be an integer from 1 to 256');
-  }
   return {
-    kind: 'moving-gradient',
-    deviceId: String(spec.deviceId),
-    from,
-    to,
-    zoneCount,
+    kind: spec.kind,
+    deviceId: spec.deviceId,
+    from: spec.from,
+    to: spec.to,
+    zoneCount: spec.zoneCount,
     offset: 0,
-    intervalMs: Math.max(50, spec.intervalMs === undefined ? 1000 : normalizeDuration(spec.intervalMs, 1000)),
-    durationMs: normalizeDuration(spec.durationMs, 400),
+    intervalMs: spec.intervalMs,
+    durationMs: spec.durationMs,
     async tick(player) {
       if (!this.zoneCount) {
         const zones = await player.getZones(this.deviceId);
@@ -120,65 +132,104 @@ function createMovingGradient(spec) {
   };
 }
 
+function delay(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal && signal.aborted) {
+      resolve(false);
+      return;
+    }
+    const timer = setTimeout(() => resolve(true), ms);
+    if (!signal) {
+      return;
+    }
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+      resolve(false);
+    }, { once: true });
+  });
+}
+
 class EffectRuntime {
-  constructor(schedule = setInterval, clear = clearInterval) {
-    this.schedule = schedule;
-    this.clear = clear;
-    this.job = null;
+  constructor(sleep = delay) {
+    this.sleep = sleep;
+    this.controller = null;
+    this.state = null;
   }
 
-  async start(effect, player) {
+  start(effect, player) {
     this.stopAll();
-    const timer = this.schedule(() => this.pump(), effect.intervalMs);
-    this.job = {
+    const controller = new AbortController();
+    this.controller = controller;
+    this.state = {
       effect,
-      timer,
       player,
       lastError: null
     };
-    await this.pump();
-    return this.status();
+    let releaseReady;
+    const ready = new Promise((resolve) => {
+      releaseReady = resolve;
+    });
+    this.task = this.loop(controller.signal, releaseReady);
+    return ready.then(() => this.status());
   }
 
-  pump() {
-    if (!this.job) {
-      return Promise.resolve();
+  async loop(signal, releaseReady) {
+    const state = this.state;
+    try {
+      while (!signal.aborted && state) {
+        try {
+          await state.effect.tick(state.player);
+          if (!signal.aborted) {
+            state.lastError = null;
+          }
+        } catch (err) {
+          if (!signal.aborted) {
+            state.lastError = err.message;
+          }
+        }
+        if (releaseReady) {
+          releaseReady();
+          releaseReady = null;
+        }
+        if (signal.aborted) {
+          return;
+        }
+        const keepGoing = await this.sleep(state.effect.intervalMs, signal);
+        if (!keepGoing || signal.aborted) {
+          return;
+        }
+      }
+    } finally {
+      if (releaseReady) {
+        releaseReady();
+      }
     }
-    const job = this.job;
-    return Promise.resolve(job.effect.tick(job.player)).then(() => {
-      if (this.job === job) {
-        job.lastError = null;
-      }
-    }).catch((err) => {
-      if (this.job === job) {
-        job.lastError = err.message;
-      }
-    });
   }
 
   stopAll() {
-    if (!this.job) {
-      return;
+    if (this.controller) {
+      this.controller.abort();
+      this.controller = null;
     }
-    this.clear(this.job.timer);
-    this.job = null;
+    this.state = null;
   }
 
   status() {
-    if (!this.job) {
+    if (!this.state) {
       return { running: false };
     }
     return {
       running: true,
-      kind: this.job.effect.kind,
-      deviceId: this.job.effect.deviceId,
-      lastError: this.job.lastError
+      kind: this.state.effect.kind,
+      deviceId: this.state.effect.deviceId,
+      lastError: this.state.lastError
     };
   }
 }
 
 module.exports = {
   EFFECT_KINDS,
+  normalizeEffectSpec,
   createEffect,
   EffectRuntime
 };

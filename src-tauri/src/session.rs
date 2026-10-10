@@ -13,11 +13,12 @@ pub enum PcEvent {
     SessionLogout,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionPlan {
     /// Process start. The host may apply a saved state or start a hosted effect.
     Startup,
-    /// Stop hosted effects, send the saved logout state, and return.
+    /// Stop hosted effects, send the logout white, and return.
     EndOneShot,
 }
 
@@ -35,6 +36,7 @@ impl PcEvent {
         }
     }
 
+    #[cfg(test)]
     pub fn parse(value: &str) -> Result<Self, ()> {
         match value {
             "session-login" => Ok(PcEvent::SessionLogin),
@@ -44,15 +46,12 @@ impl PcEvent {
     }
 }
 
+#[cfg(test)]
 pub fn plan(event: PcEvent) -> SessionPlan {
     match event {
         PcEvent::SessionLogin => SessionPlan::Startup,
         PcEvent::SessionLogout => SessionPlan::EndOneShot,
     }
-}
-
-pub fn plan_named(name: &str) -> Result<SessionPlan, ()> {
-    PcEvent::parse(name).map(plan)
 }
 
 pub fn event_names() -> [&'static str; 2] {
@@ -75,7 +74,7 @@ pub fn logout_hook_note() -> &'static str {
             "Windows logoff sends the logout white from WM_QUERYENDSESSION and WM_ENDSESSION, then stops hosted effects. Quitting the tray does not send it. Closing the window only hides it."
         }
         _ => {
-            "Linux does not hook the desktop session. Login runs when StayLit starts. Logout white is not sent automatically here; the session-end command still stops effects and queues that one-shot."
+            "Linux does not hook the desktop session. Login runs when StayLit starts. Logout white is not sent automatically here. The manual control sends that white through the sidecar."
         }
     }
 }

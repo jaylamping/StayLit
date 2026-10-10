@@ -17,16 +17,12 @@ const LIMITS = {
   durationMax: 60000
 };
 
-function fail(message) {
-  throw new CommandError('bad_color', message);
-}
-
-function numberIn(value, min, max, label) {
+function numberIn(value, min, max, label, code = 'bad_color') {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    fail(`${label} must be a number`);
+    throw new CommandError(code, `${label} must be a number`);
   }
   if (value < min || value > max) {
-    fail(`${label} must be between ${min} and ${max}`);
+    throw new CommandError(code, `${label} must be between ${min} and ${max}`);
   }
   return Math.round(value);
 }
@@ -149,26 +145,11 @@ function planZoneWrites(zones, durationMs) {
   return groups;
 }
 
-function applyZoneWrites(light, writes) {
-  writes.forEach((write) => {
-    light.colorZones(
-      write.startIndex,
-      write.endIndex,
-      write.hue,
-      write.saturation,
-      write.brightness,
-      write.kelvin,
-      write.durationMs,
-      write.apply
-    );
-  });
-}
-
 module.exports = {
   LIMITS,
+  numberIn,
   normalizeColor,
   normalizeDuration,
   buildGradient,
-  planZoneWrites,
-  applyZoneWrites
+  planZoneWrites
 };
