@@ -1,16 +1,25 @@
 mod session;
+mod session_end;
 mod sidecar;
 
+#[cfg(windows)]
+mod session_win;
+
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 
 use crate::session::{event_names, logout_hook_note, plan_named, PcEvent, SessionPlan};
+use crate::session_end::{dispatch, resolve, ExitDispatch, ExitReason};
 use crate::sidecar::Sidecar;
+
+static TRAY_QUIT: AtomicBool = AtomicBool::new(false);
+static LOGOUT_SENT: AtomicBool = AtomicBool::new(false);
 
 struct AutostartNote(Mutex<Option<String>>);
 
@@ -46,6 +55,13 @@ pub fn run() {
             sidecar.set_app(app.handle().clone());
             app.manage(sidecar);
             setup_tray(app.handle())?;
+            #[cfg(windows)]
+            {
+                let _ = APP_HANDLE.set(app.handle().clone());
+                if let Err(err) = session_win::install(app.handle()) {
+                    eprintln!("staylit: Windows session-end hook was not installed: {err}");
+                }
+            }
             if let Err(err) = ensure_autostart_default(app.handle()) {
                 if let Some(note) = app.try_state::<AutostartNote>() {
                     *note.0.lock().expect("autostart note") = Some(err);
@@ -55,8 +71,13 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                match dispatch(ExitReason::WindowClose) {
+                    ExitDispatch::Hide => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    ExitDispatch::StopEffects | ExitDispatch::LogoutWhite => {}
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -68,8 +89,49 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building StayLit")
-        .run(|_app, _event| {});
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                if TRAY_QUIT.load(Ordering::SeqCst) {
+                    return;
+                }
+                if cfg!(windows) {
+                    perform(app, ExitReason::SessionEnd);
+                }
+            }
+        });
 }
+
+fn perform(app: &AppHandle, reason: ExitReason) {
+    match resolve(reason, TRAY_QUIT.load(Ordering::SeqCst)) {
+        ExitDispatch::Hide => {}
+        ExitDispatch::StopEffects => {
+            let _ = send(app, "shutdown", json!({}));
+        }
+        ExitDispatch::LogoutWhite => {
+            if LOGOUT_SENT.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            let _ = send(
+                app,
+                "session.event",
+                json!({ "event": PcEvent::SessionLogout.as_str() }),
+            );
+        }
+    }
+}
+
+#[cfg(windows)]
+fn handle_windows_session_message(msg: u32, wparam: isize) {
+    let Some(app) = APP_HANDLE.get() else {
+        return;
+    };
+    if session_end::classify_window_message(msg, wparam).is_some() {
+        perform(app, ExitReason::SessionEnd);
+    }
+}
+
+#[cfg(windows)]
+static APP_HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show = MenuItem::with_id(app, "show", "Open StayLit", true, None::<&str>)?;
@@ -121,10 +183,23 @@ fn send(app: &AppHandle, method: &str, params: Value) -> Result<Value, String> {
 }
 
 fn quit_app(app: &AppHandle) {
+    TRAY_QUIT.store(true, Ordering::SeqCst);
     let handle = app.clone();
     std::thread::spawn(move || {
+        match dispatch(ExitReason::TrayQuit) {
+            ExitDispatch::StopEffects => {
+                let _ = send(&handle, "shutdown", json!({}));
+            }
+            ExitDispatch::LogoutWhite => {
+                let _ = send(
+                    &handle,
+                    "session.event",
+                    json!({ "event": PcEvent::SessionLogout.as_str() }),
+                );
+            }
+            ExitDispatch::Hide => {}
+        }
         if let Some(sidecar) = handle.try_state::<Sidecar>() {
-            let _ = sidecar.request("shutdown", json!({}));
             sidecar.stop();
         }
         handle.exit(0);
@@ -193,11 +268,16 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 fn session_end(app: AppHandle) -> Result<Value, String> {
     let event = PcEvent::SessionLogout;
     match plan_named(event.as_str()).map_err(|_| "unknown session event".to_string())? {
-        SessionPlan::EndOneShot => send(
-            &app,
-            "session.event",
-            json!({ "event": event.as_str() }),
-        ),
+        SessionPlan::EndOneShot => match dispatch(ExitReason::SessionEnd) {
+            ExitDispatch::LogoutWhite => send(
+                &app,
+                "session.event",
+                json!({ "event": event.as_str() }),
+            ),
+            ExitDispatch::StopEffects | ExitDispatch::Hide => {
+                Err("session end does not send logout white".to_string())
+            }
+        },
         SessionPlan::Startup => Err("session end is not a startup action".to_string()),
     }
 }

@@ -279,6 +279,12 @@ class LifxPlayer {
     }
   }
 
+  flush() {
+    return new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+  }
+
   destroy() {
     try {
       this.client.destroy();

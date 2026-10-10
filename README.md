@@ -4,7 +4,7 @@ Desktop hub for Joey’s LIFX lights. The office PC runs the effects so a phone 
 
 StayLit is a Tauri 2 tray app. Rust owns the tray, the window, and start-with-Windows. A Node sidecar speaks the LIFX LAN protocol on UDP 56700. The window is only the UI: closing it hides to the tray and leaves hosted effects running. Quitting from the tray stops those effects.
 
-There is no LIFX account, cloud API, or Windows service. He is logged in while effects run. Login means the app started with the session. Logout is a one-shot white (default 3800K, full brightness) on the session-end path, then the effect loop stops.
+There is no LIFX account, cloud API, or Windows service. He is logged in while effects run. Login means the app started with the session. Logout is a one-shot white (default 3800K, full brightness). On Windows that white is sent from `WM_QUERYENDSESSION` / `WM_ENDSESSION` before the process exits. Quitting the tray stops effects and does not send it. Linux does not hook logoff.
 
 ## Run
 

@@ -207,6 +207,9 @@ async function handleSessionEvent(ctx, eventName) {
     }
     const state = ctx.store.logoutState();
     const applied = await applySavedState(ctx.player, state, { wait: false });
+    if (typeof ctx.player.flush === 'function') {
+      await ctx.player.flush();
+    }
     return { event, effects: 'stopped', applied: state.id, result: applied };
   }
   if (event === 'session-login') {

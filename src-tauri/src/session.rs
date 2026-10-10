@@ -2,10 +2,10 @@
 //!
 //! Login is not an OS notification. The tray process starts with the user
 //! session, and that start is the login trigger.
-//! Logout is a one-shot on the session-end path. It is best-effort: this
-//! build does not install a Windows service, and on Linux there is no
-//! session hook. Add lock, unlock, or idle as new variants here and in the
-//! sidecar `PC_EVENTS` list.
+//! Logout is a one-shot on the session-end path. Windows logoff is
+//! `WM_QUERYENDSESSION` / `WM_ENDSESSION` (see `session_end`). Linux has no
+//! session hook. This is not a Windows service. Add lock, unlock, or idle as
+//! new variants here and in the sidecar `PC_EVENTS` list.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PcEvent {
@@ -63,7 +63,7 @@ pub fn hooks() -> SessionHooks {
     SessionHooks {
         login: "process-start",
         #[cfg(windows)]
-        logout_hook: "windows-stub",
+        logout_hook: "wm-endsession",
         #[cfg(not(windows))]
         logout_hook: "skipped",
     }
@@ -71,8 +71,8 @@ pub fn hooks() -> SessionHooks {
 
 pub fn logout_hook_note() -> &'static str {
     match hooks().logout_hook {
-        "windows-stub" => {
-            "Logout white is a one-shot on the session-end path. This build does not register WM_ENDSESSION, and it is not a Windows service. Closing the window leaves effects running. Quitting the tray stops them without sending the logout white."
+        "wm-endsession" => {
+            "Windows logoff sends the logout white from WM_QUERYENDSESSION and WM_ENDSESSION, then stops hosted effects. Quitting the tray does not send it. Closing the window only hides it."
         }
         _ => {
             "Linux does not hook the desktop session. Login runs when StayLit starts. Logout white is not sent automatically here; the session-end command still stops effects and queues that one-shot."
@@ -104,7 +104,7 @@ mod tests {
         let hooks = hooks();
         assert_eq!(hooks.login, "process-start");
         #[cfg(windows)]
-        assert_eq!(hooks.logout_hook, "windows-stub");
+        assert_eq!(hooks.logout_hook, "wm-endsession");
         #[cfg(not(windows))]
         assert_eq!(hooks.logout_hook, "skipped");
     }
