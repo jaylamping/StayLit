@@ -55,10 +55,37 @@ export type Effect = {
 } | null;
 export type Notice = { scope: string; message: string } | null;
 
-const officeRoom: Room = { id: "office", name: "Office", groupIds: ["desk", "overhead"] };
+const officeRoom: Room = { id: "office", name: "Office", groupIds: ["desk", "overhead", "strip"] };
 const deskGroup: Group = { id: "desk", name: "Desk", lightIds: [] };
 const overheadGroup: Group = { id: "overhead", name: "Overhead", lightIds: [] };
+const stripGroup: Group = { id: "strip", name: "Strip", lightIds: [] };
 const sampleIds = new Set(["desk", "monitor", "shelf", "ceiling", "rear", "strip", "floor", "table"]);
+
+export const cycleIntervalMs = 1000;
+
+export function isCandle(light: { name: string }) {
+  return /\bcandle\b/i.test(light.name);
+}
+
+function homeGroup(light: Light) {
+  if (light.ability === "multizone") return "strip";
+  if (isCandle(light) || /^corner light$/i.test(light.name.trim())) return "desk";
+  if (/^office \d+$/i.test(light.name.trim())) return "overhead";
+  return null;
+}
+
+function placeLights(lights: Light[], rooms: Room[], groups: Group[], ids: ReadonlySet<string>) {
+  const taken = new Set(groups.flatMap((group) => group.lightIds));
+  let placed = groups;
+  for (const light of lights) {
+    if (!ids.has(light.id) || taken.has(light.id)) continue;
+    const groupId = homeGroup(light);
+    if (!groupId || !rooms.find((room) => room.id === light.roomId)?.groupIds.includes(groupId)) continue;
+    placed = placed.map((group) => (group.id === groupId ? { ...group, lightIds: [...group.lightIds, light.id] } : group));
+    taken.add(light.id);
+  }
+  return placed;
+}
 
 const looks: Look[] = [];
 
@@ -126,16 +153,20 @@ function layout(saved: ReturnType<typeof loadWindow>) {
     office && office.groupIds.includes("desk") && office.groupIds.includes("overhead") && saved?.groups
       ? { rooms: savedRooms, groups: saved.groups }
       : null;
-  const rooms = kept?.rooms ?? [officeRoom];
-  const groups = kept?.groups ?? [deskGroup, overheadGroup];
-  const withDesk = groups.some((group) => group.id === "desk") ? groups : [deskGroup, ...groups];
+  const savedGroups = kept?.groups ?? [deskGroup, overheadGroup];
+  const withDesk = savedGroups.some((group) => group.id === "desk") ? savedGroups : [deskGroup, ...savedGroups];
   const withOverhead = withDesk.some((group) => group.id === "overhead") ? withDesk : [...withDesk, overheadGroup];
-  return { rooms, groups: withOverhead };
+  const reseed = !withOverhead.some((group) => group.id === "strip");
+  const groups = reseed ? [...withOverhead, stripGroup] : withOverhead;
+  const rooms = (kept?.rooms ?? [officeRoom]).map((room) =>
+    room.id === "office" && !room.groupIds.includes("strip") ? { ...room, groupIds: [...room.groupIds, "strip"] } : room,
+  );
+  return { rooms, groups, reseed };
 }
 
 function opened() {
   const saved = loadWindow();
-  const { rooms, groups } = layout(saved);
+  const { rooms, groups: laidOut, reseed } = layout(saved);
   const room = rooms.find((item) => item.id === saved?.roomId) ?? rooms.find((item) => item.id === "office") ?? rooms[0];
   if (!room) throw new Error("Office is missing");
   let page: Page = saved?.page ?? { kind: "room" };
@@ -155,6 +186,7 @@ function opened() {
         roomId: rooms.some((item) => item.id === savedLight.roomId) ? savedLight.roomId : "office",
       };
     });
+  const groups = reseed ? placeLights(lights, rooms, laidOut, new Set(lights.map((light) => light.id))) : laidOut;
   return {
     roomId: room.id,
     page,
@@ -373,7 +405,7 @@ export const useOffice = create<OfficeState>((set, get) => ({
       kind: "color-cycle",
     };
     set({ effect, notice: null });
-    void lifx("effects.start", { kind: "color-cycle", deviceIds: selection.lightIds }).catch((err: unknown) => {
+    void lifx("effects.start", { kind: "color-cycle", deviceIds: selection.lightIds, intervalMs: cycleIntervalMs }).catch((err: unknown) => {
       set({ effect: previous, notice: { scope: "effect", message: messageOf(err) } });
     });
   },
@@ -575,9 +607,11 @@ function effectFromStatus(status: { running?: boolean; kind?: string; deviceId?:
 function liveEffect(effect: Effect, lights: Light[]): Effect {
   if (!effect) return effect;
   const id = effect.lightIds[0];
-  const color = id ? lights.find((light) => light.id === id)?.color : undefined;
-  if (!color || color === effect.accent) return effect;
-  return { ...effect, accent: color };
+  const lead = id ? lights.find((light) => light.id === id) : undefined;
+  if (!lead) return effect;
+  const target = effect.lightIds.length === 1 ? lead.name : effect.target;
+  if (lead.color === effect.accent && target === effect.target) return effect;
+  return { ...effect, accent: lead.color, target };
 }
 
 function releasePaint() {
@@ -593,7 +627,13 @@ function showDiscovered(devices: DeviceSnap[]) {
   const lights = mergeDevices(current.lights, devices);
   const selectedLightId = lights.some((light) => light.id === current.selectedLightId) ? current.selectedLightId : null;
   const effect = liveEffect(current.effect, lights);
-  quietly(() => useOffice.setState({ lights, selectedLightId, effect }));
+  const known = new Set(current.lights.map((light) => light.id));
+  const fresh = new Set(lights.filter((light) => !known.has(light.id)).map((light) => light.id));
+  if (fresh.size === 0) {
+    quietly(() => useOffice.setState({ lights, selectedLightId, effect }));
+    return;
+  }
+  useOffice.setState({ lights, selectedLightId, effect, groups: placeLights(lights, current.rooms, current.groups, fresh) });
 }
 
 let discoveryWatch: ReturnType<typeof setInterval> | undefined;

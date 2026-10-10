@@ -2,30 +2,169 @@ import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { cycleSelection, useOffice, type Light } from "@/store";
+import { hueHex } from "@/lib/devices";
+import { sampleZones, wellFill, wellStyle } from "@/lib/well";
+import { cycleIntervalMs, cycleSelection, useOffice, type Light } from "@/store";
 
-function lightMeta(light: Light) {
+const hueNames: [number, string][] = [
+  [0, "Red"],
+  [25, "Orange"],
+  [45, "Amber"],
+  [58, "Yellow"],
+  [85, "Lime"],
+  [120, "Green"],
+  [150, "Mint"],
+  [175, "Teal"],
+  [195, "Cyan"],
+  [212, "Sky"],
+  [232, "Blue"],
+  [262, "Violet"],
+  [285, "Purple"],
+  [310, "Magenta"],
+  [335, "Pink"],
+];
+
+function hueName(hue: number) {
+  const h = ((hue % 360) + 360) % 360;
+  let best = hueNames[0] ?? [0, "Red"];
+  let gap = 360;
+  for (const entry of hueNames) {
+    const distance = Math.min(Math.abs(entry[0] - h), 360 - Math.abs(entry[0] - h));
+    if (distance < gap) {
+      gap = distance;
+      best = entry;
+    }
+  }
+  return best[1];
+}
+
+const meterSpan = 90;
+const beadAt = 0.38;
+const hueAt = (hue: number, position: number) => hue + meterSpan * (beadAt - position);
+const hueTrack = `linear-gradient(90deg, ${[0, 60, 120, 180, 240, 300, 360].map((hue) => hueHex(hue)).join(", ")})`;
+const kelvinTrack = "linear-gradient(90deg, #ffb46b, #ffe4c8 50%, #e6eeff)";
+
+function lightMeta(light: Light, driven: string | null) {
   if (light.offline) return "Offline";
+  if (driven && light.on) return `${driven} · ${light.brightness}%`;
   if (!light.on) return light.mode === "white" ? `${light.kelvin}K · off` : "Off";
   if (light.mode === "white") return `${light.kelvin}K · ${light.brightness}%`;
-  if (light.ability === "multizone") return "On";
+  if (light.ability === "multizone") return `${light.zones?.length ?? 0} zones · ${light.brightness}%`;
   return `Color · ${light.brightness}%`;
 }
 
-function HueMeter({ accent }: { accent: string }) {
+function Meter({ background, bead, labels }: { background: string; bead: string | null; labels: [string, string, string] }) {
   return (
-    <div className="mt-3 max-w-[520px]">
-      <div className="hue-meter" style={{ "--meter": accent } as CSSProperties}>
-        <span className="hue-bead" />
+    <div className="mt-[18px]">
+      <div className="hue-meter" style={{ background, "--meter": bead ?? "transparent" } as CSSProperties}>
+        {bead ? <span className="hue-bead" /> : null}
       </div>
-      <div className="mt-1 flex justify-between text-[10px] text-muted">
-        <span>Violet</span>
-        <span>Blue</span>
-        <span>Teal</span>
+      <div className="mt-[7px] flex justify-between text-[10.5px] text-dim">
+        {labels.map((label, index) => (
+          <span key={`${index}-${label}`}>{label}</span>
+        ))}
       </div>
     </div>
   );
 }
+
+function CycleMeter({ hue, accent }: { hue: number; accent: string }) {
+  const stops = [0, 0.25, beadAt, 0.5, 0.75, 1].map((position) => `${hueHex(hueAt(hue, position))} ${position * 100}%`);
+  return (
+    <Meter
+      background={`linear-gradient(90deg, ${stops.join(", ")})`}
+      bead={accent}
+      labels={[hueName(hueAt(hue, 0)), hueName(hue), hueName(hueAt(hue, 1))]}
+    />
+  );
+}
+
+const EffectBand = memo(function EffectBand() {
+  const roomId = useOffice((state) => state.roomId);
+  const effect = useOffice((state) => state.effect);
+  const notice = useOffice((state) => (state.notice?.scope === "effect" ? state.notice.message : null));
+  const otherRoom = useOffice((state) =>
+    state.effect && state.effect.roomId !== state.roomId ? (state.rooms.find((room) => room.id === state.effect?.roomId)?.name ?? null) : null,
+  );
+  const lead = useOffice((state) => {
+    const id = state.effect?.roomId === state.roomId ? state.effect.lightIds[0] : undefined;
+    return id ? (state.lights.find((light) => light.id === id) ?? null) : null;
+  });
+  const lookAccent = useOffice((state) => {
+    const look = state.looks.find((item) => item.id === state.selectedLookId && item.roomId === state.roomId);
+    if (!look) return null;
+    const page = state.page;
+    if (page.kind === "group" && !look.groupIds.includes(page.groupId)) return null;
+    return look.accent;
+  });
+  const cycleTarget = useOffice((state) => cycleSelection(state).target);
+  const strip = useOffice((state) =>
+    state.lights.find((light) => light.roomId === state.roomId && light.ability === "multizone" && light.live && !light.offline)?.name ?? null,
+  );
+  const setRoom = useOffice((state) => state.setRoom);
+  const startCycle = useOffice((state) => state.startCycle);
+  const startGradient = useOffice((state) => state.startGradient);
+  const stopEffect = useOffice((state) => state.stopEffect);
+  const here = effect?.roomId === roomId ? effect : null;
+  const glow = here?.accent ?? lookAccent ?? "#e39a45";
+  const zones = lead?.zones?.length ? sampleZones(lead.zones, 12) : null;
+  return (
+    <div
+      className="fx-band min-h-[158px] shrink-0 border-b border-border px-[26px] pt-[22px] pb-5"
+      style={{ "--glow": glow, "--glow-strength": here ? "30%" : "16%" } as CSSProperties}
+    >
+      <div className="flex items-start gap-4">
+        <div className="min-w-0 flex-1">
+          {here ? (
+            <>
+              <div className="text-[10.5px] font-semibold tracking-[0.1em] uppercase" style={{ color: `color-mix(in srgb, ${here.accent} 45%, #ffffff)` }}>
+                Running
+              </div>
+              <h1 className="mt-1.5 mb-0.5 text-[26px] leading-tight font-semibold tracking-[-0.03em]">{here.name}</h1>
+              <p className="text-[13px] text-muted">
+                on <b className="font-medium text-foreground">{here.target}</b>
+                {here.kind === "color-cycle" ? ` · every ${cycleIntervalMs / 1000} s` : ""}
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="text-[10.5px] font-semibold tracking-[0.1em] text-muted uppercase">Effects</div>
+              <h1 className="mt-1.5 mb-0.5 text-[26px] leading-tight font-semibold tracking-[-0.03em]">Nothing running</h1>
+              <p className="text-[13px] text-muted">Lights stay as you set them.</p>
+            </>
+          )}
+          {notice ? <p className="mt-1 text-xs text-foreground">{notice}</p> : null}
+        </div>
+        {here ? <Button onClick={() => stopEffect()}>Stop</Button> : null}
+        {otherRoom && effect && !here ? (
+          <Button variant="ghost" onClick={() => setRoom(effect.roomId)}>
+            Show {otherRoom}
+          </Button>
+        ) : null}
+      </div>
+      {here?.kind === "color-cycle" ? <CycleMeter hue={lead?.hue ?? 30} accent={here.accent} /> : null}
+      {here?.kind === "moving-gradient" ? (
+        <Meter
+          background={zones ? `linear-gradient(90deg, ${zones.join(", ")})` : "linear-gradient(90deg, #3a2418, #b8743c, #f3d7b4, #6e3d2a, #3a2418)"}
+          bead={null}
+          labels={["Zone 1", "", `Zone ${lead?.zones?.length ?? ""}`.trim()]}
+        />
+      ) : null}
+      {here ? null : (
+        <div className="mt-[18px] flex flex-wrap gap-2">
+          <Button variant="ghost" className="h-7 px-3" onClick={() => startCycle()}>
+            Color cycle <span className="font-normal text-muted">{cycleTarget}</span>
+          </Button>
+          {strip ? (
+            <Button variant="ghost" className="h-7 px-3" onClick={() => startGradient()}>
+              Moving gradient <span className="font-normal text-muted">{strip}</span>
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+});
 
 const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
   const setLightPaint = useOffice((state) => state.setLightPaint);
@@ -59,14 +198,15 @@ const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
   const kelvin = draft.kelvin ?? light.kelvin ?? 3800;
   const brightness = draft.brightness ?? light.brightness;
   return (
-    <div className="mt-3 grid gap-3">
+    <div>
       {white ? (
         <Slider
           label="Kelvin"
           value={kelvin}
           min={2500}
           max={9000}
-          color="linear-gradient(90deg, #e7a15a, #f7f4ef)"
+          color={light.color}
+          track={kelvinTrack}
           display={`${Math.round(kelvin)}K`}
           onValueChange={(value) => queue({ kelvin: value })}
         />
@@ -78,6 +218,7 @@ const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
             min={0}
             max={360}
             color={light.color}
+            track={hueTrack}
             display={`${Math.round(hue)}`}
             onValueChange={(value) => queue({ hue: value })}
           />
@@ -101,45 +242,64 @@ const PaintSliders = memo(function PaintSliders({ light }: { light: Light }) {
   );
 });
 
-const LightCard = memo(function LightCard({ id }: { id: string }) {
+function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: string }) {
+  return (
+    <button
+      type="button"
+      className={
+        on
+          ? "h-6 rounded-full border border-border-strong px-2.5 text-xs font-medium"
+          : "h-6 rounded-full px-2.5 text-xs font-medium text-muted"
+      }
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+const LightPanel = memo(function LightPanel({ id }: { id: string }) {
   const light = useOffice((state) => state.lights.find((item) => item.id === id) ?? null);
   const notice = useOffice((state) => (state.notice?.scope === id ? state.notice.message : null));
+  const driven = useOffice((state) =>
+    state.effect && state.effect.roomId === state.roomId && state.effect.lightIds.includes(id) ? state.effect.name : null,
+  );
+  const drivenColor = useOffice((state) => (state.effect?.lightIds.includes(id) ? state.effect.accent : null));
   const setLightPaint = useOffice((state) => state.setLightPaint);
   const roomIds = useOffice(useShallow((state) => state.rooms.map((room) => room.id)));
   const roomNames = useOffice(useShallow((state) => state.rooms.map((room) => room.name)));
   const groupIds = useOffice(useShallow((state) => state.rooms.find((room) => room.id === light?.roomId)?.groupIds ?? []));
-  const groupNames = useOffice(useShallow((state) => {
-    const ids = state.rooms.find((room) => room.id === light?.roomId)?.groupIds ?? [];
-    return ids.map((id) => state.groups.find((group) => group.id === id)?.name ?? id);
-  }));
+  const groupNames = useOffice(
+    useShallow((state) => {
+      const ids = state.rooms.find((room) => room.id === light?.roomId)?.groupIds ?? [];
+      return ids.map((item) => state.groups.find((group) => group.id === item)?.name ?? item);
+    }),
+  );
   const groupId = useOffice((state) => state.groups.find((group) => group.lightIds.includes(id))?.id ?? null);
   const assignRoom = useOffice((state) => state.assignRoom);
   const assignGroup = useOffice((state) => state.assignGroup);
   const [moving, setMoving] = useState(false);
   if (!light) return null;
   const white = light.mode === "white";
-  const groupName = groupNames[groupIds.indexOf(groupId ?? "")] ?? "No group";
+  const groupName = groupNames[groupIds.indexOf(groupId ?? "")] ?? null;
+  const fill = wellFill(light, drivenColor);
+  const lit = Boolean(driven && light.on);
   return (
-    <div className="max-w-[560px]">
-      <div className="flex items-start gap-3">
-        <span
-          className="size-11 shrink-0 rounded-[12px]"
-          style={
-            light.on
-              ? { background: light.color, boxShadow: `0 0 16px color-mix(in srgb, ${light.color} 40%, transparent)` }
-              : { boxShadow: `inset 0 0 0 1.5px color-mix(in srgb, ${light.color} 75%, transparent)` }
-          }
-        />
+    <div>
+      <div className="mb-3.5 flex items-center gap-3">
+        <span className="size-11 shrink-0 rounded-[12px]" style={wellStyle(light, fill, { driven: lit, size: 44 })} />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold tracking-tight">{light.name}</div>
-          <p className="text-xs text-muted">{lightMeta(light)}</p>
+          <div className="truncate text-base font-semibold tracking-[-0.01em]">{light.name}</div>
+          <p className="truncate text-xs text-muted tabular-nums">{[groupName, lightMeta(light, driven)].filter(Boolean).join(" · ")}</p>
           {notice ? <p className="mt-1 text-xs text-foreground">{notice}</p> : null}
         </div>
-        <div className="flex rounded-full border border-border p-0.5 text-[12px]">
+        <div role="radiogroup" aria-label="Mode" className="flex shrink-0 rounded-[9px] border border-border bg-seg p-0.5">
           {light.ability === "white" ? null : (
             <button
               type="button"
-              className={white ? "rounded-full px-3 py-1 text-muted" : "rounded-full bg-foreground/10 px-3 py-1"}
+              role="radio"
+              aria-checked={!white}
+              className={white ? "rounded-[7px] px-3 py-[5px] text-xs font-medium text-muted" : "rounded-[7px] bg-seg-on px-3 py-[5px] text-xs font-medium"}
               onClick={() => setLightPaint(light.id, { mode: "color" })}
             >
               Color
@@ -147,7 +307,9 @@ const LightCard = memo(function LightCard({ id }: { id: string }) {
           )}
           <button
             type="button"
-            className={white ? "rounded-full bg-foreground/10 px-3 py-1" : "rounded-full px-3 py-1 text-muted"}
+            role="radio"
+            aria-checked={white}
+            className={white ? "rounded-[7px] bg-seg-on px-3 py-[5px] text-xs font-medium" : "rounded-[7px] px-3 py-[5px] text-xs font-medium text-muted"}
             onClick={() => setLightPaint(light.id, { mode: "white" })}
           >
             White
@@ -155,34 +317,36 @@ const LightCard = memo(function LightCard({ id }: { id: string }) {
         </div>
       </div>
       <PaintSliders light={light} />
-      <div className="mt-4 flex items-center gap-2 text-xs text-muted">
-        <span>Group</span>
-        <span className="rounded-full border border-border px-2.5 py-1 text-foreground">{groupName}</span>
-        <button type="button" className="text-muted" onClick={() => setMoving((open) => !open)}>
+      <div className="mt-[18px] flex items-center gap-3.5">
+        <span className="text-xs font-medium text-muted">Group</span>
+        <span className="inline-flex h-6 items-center rounded-full border border-border-strong px-[11px] text-xs font-medium">{groupName ?? "None"}</span>
+        <button type="button" aria-expanded={moving} className="text-xs font-medium text-muted" onClick={() => setMoving((open) => !open)}>
           Move…
         </button>
       </div>
       {moving ? (
-        <div className="mt-2 grid gap-2">
+        <div className="mt-2.5 grid gap-1.5">
           {groupIds.length ? (
             <div className="flex flex-wrap gap-1">
-              <Button variant={groupId === null ? "ghost" : "quiet"} onClick={() => assignGroup(light.id, null)}>
-                No group
-              </Button>
               {groupIds.map((item, index) => (
-                <Button key={item} variant={groupId === item ? "ghost" : "quiet"} onClick={() => assignGroup(light.id, item)}>
-                  {groupNames[index]}
-                </Button>
+                <Chip key={item} on={groupId === item} onClick={() => assignGroup(light.id, item)}>
+                  {groupNames[index] ?? item}
+                </Chip>
+              ))}
+              <Chip on={groupId === null} onClick={() => assignGroup(light.id, null)}>
+                No group
+              </Chip>
+            </div>
+          ) : null}
+          {roomIds.length > 1 ? (
+            <div className="flex flex-wrap gap-1">
+              {roomIds.map((roomId, index) => (
+                <Chip key={roomId} on={roomId === light.roomId} onClick={() => assignRoom(light.id, roomId)}>
+                  {roomNames[index] ?? roomId}
+                </Chip>
               ))}
             </div>
           ) : null}
-          <div className="flex flex-wrap gap-1">
-            {roomIds.map((roomId, index) => (
-              <Button key={roomId} variant={roomId === light.roomId ? "ghost" : "quiet"} onClick={() => assignRoom(light.id, roomId)}>
-                {roomNames[index]}
-              </Button>
-            ))}
-          </div>
         </div>
       ) : null}
     </div>
@@ -198,129 +362,68 @@ const LookRow = memo(function LookRow({ id }: { id: string }) {
     if (page.kind === "group" && !item.groupIds.includes(page.groupId)) return false;
     return true;
   });
-  const accent = useOffice((state) => {
-    const item = state.looks.find((entry) => entry.id === id);
-    if (state.selectedLookId !== id || !item) return null;
-    const page = state.page;
-    if (page.kind === "group" && !item.groupIds.includes(page.groupId)) return null;
-    return state.effect?.roomId === state.roomId ? state.effect.accent : item.accent;
-  });
   const notice = useOffice((state) => (state.notice?.scope === `look:${id}` ? state.notice.message : null));
   const label = useOffice((state) => {
+    const item = state.looks.find((entry) => entry.id === id);
     const page = state.page;
     if (page.kind === "group") return state.groups.find((group) => group.id === page.groupId)?.name ?? "";
-    return "Desk, Overhead, Strip";
+    return (item?.groupIds ?? []).map((groupId) => state.groups.find((group) => group.id === groupId)?.name ?? groupId).join(", ");
   });
   const selectLook = useOffice((state) => state.selectLook);
   if (!look) return null;
   return (
     <button
       type="button"
-      className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2 text-left"
-      style={active && accent ? { background: `color-mix(in srgb, ${accent} 16%, transparent)` } : undefined}
+      className={active ? "mt-1 flex w-full items-center gap-2.5 rounded-[9px] bg-raise p-2 text-left" : "mt-1 flex w-full items-center gap-2.5 rounded-[9px] p-2 text-left"}
       onClick={() => selectLook(look.id)}
     >
-      <span className="flex gap-1">
+      <span className="flex shrink-0 gap-[3px]">
         {look.chips.map((chip, index) => (
-          <span
+          <i
             key={`${look.id}-${index}`}
-            className="size-4 rounded-[5px]"
-            style={chip.off ? { boxShadow: "inset 0 0 0 1.5px var(--border)" } : { background: chip.color }}
+            className="h-[18px] w-[9px] rounded-[3px]"
+            style={chip.off ? { background: "var(--track)" } : { background: chip.color }}
           />
         ))}
       </span>
-      <span>
-        <span className="block text-sm font-semibold tracking-tight">{look.name}</span>
-        <span className="block text-xs text-muted">{label}</span>
-        {notice ? <span className="block text-xs text-foreground">{notice}</span> : null}
+      <span className="min-w-0">
+        <span className="block truncate text-[13px] font-medium">{look.name}</span>
+        <span className="block truncate text-[11px] text-dim">{label}</span>
+        {notice ? <span className="block text-[11px] text-foreground">{notice}</span> : null}
       </span>
     </button>
   );
 });
 
-export const Stage = memo(function Stage() {
-  const roomId = useOffice((state) => state.roomId);
-  const effect = useOffice((state) => state.effect);
-  const selectedId = useOffice((state) => state.selectedLightId);
-  const notice = useOffice((state) => (state.notice?.scope === "effect" ? state.notice.message : null));
+const Looks = memo(function Looks() {
   const lookIds = useOffice(useShallow((state) => state.looks.filter((look) => look.roomId === state.roomId).map((look) => look.id)));
-  const otherRoom = useOffice((state) => (state.effect && state.effect.roomId !== state.roomId ? state.rooms.find((room) => room.id === state.effect?.roomId)?.name ?? null : null));
-  const setRoom = useOffice((state) => state.setRoom);
-  const cycleTarget = useOffice((state) => cycleSelection(state).target);
-  const showGradient = useOffice((state) => state.lights.some((light) => light.roomId === state.roomId && light.ability === "multizone"));
-  const startCycle = useOffice((state) => state.startCycle);
-  const startGradient = useOffice((state) => state.startGradient);
-  const stopEffect = useOffice((state) => state.stopEffect);
-  const here = effect?.roomId === roomId ? effect : null;
-  const band = here?.accent;
+  const running = useOffice((state) => (state.effect?.roomId === state.roomId ? state.effect : null));
+  const stops = running ? `${running.kind === "color-cycle" ? "the cycle" : "the gradient"} on ${running.target}` : "a running effect";
   return (
-    <section className="flex min-w-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div
-          className="shrink-0 border-b border-border px-6 py-4"
-          style={
-            band
-              ? { background: `linear-gradient(180deg, color-mix(in srgb, ${band} 32%, transparent), transparent 85%)` }
-              : undefined
-          }
-        >
-          <div className="flex items-start gap-4">
-            <div className="min-w-0 flex-1">
-              {here ? (
-                <>
-                  <p className="text-[11px] font-semibold tracking-[0.14em] text-muted uppercase">Running</p>
-                  <h1 className="text-[26px] font-medium tracking-tight">{here.name}</h1>
-                  <p className="text-sm text-muted">on {here.target}</p>
-                  {here.kind === "color-cycle" ? <HueMeter accent={here.accent} /> : (
-                    <div className="mt-3 max-w-[520px] overflow-hidden rounded-full">
-                      <div className="effect-zones" />
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <h1 className="text-[26px] font-medium tracking-tight">Nothing running</h1>
-                  <p className="mt-1 text-sm text-muted">Lights stay as you set them.</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" className="rounded-xl border border-border px-3.5 py-2 text-left" onClick={() => startCycle()}>
-                      <span className="block text-sm font-semibold">Color cycle</span>
-                      <span className="block text-xs text-muted">{cycleTarget}</span>
-                    </button>
-                    {showGradient ? (
-                      <button type="button" className="rounded-xl border border-border px-3.5 py-2 text-left" onClick={() => startGradient()}>
-                        <span className="block text-sm font-semibold">Moving gradient</span>
-                        <span className="block text-xs text-muted">Lightstrip</span>
-                      </button>
-                    ) : null}
-                  </div>
-                </>
-              )}
-              {notice ? <p className="mt-2 text-sm text-foreground">{notice}</p> : null}
-              {otherRoom && effect && !here ? (
-                <Button variant="quiet" className="mt-2" onClick={() => setRoom(effect.roomId)}>
-                  Show {otherRoom}
-                </Button>
-              ) : null}
-            </div>
-            {here ? (
-              <Button onClick={() => stopEffect()}>Stop</Button>
-            ) : null}
-          </div>
+    <aside className="min-h-0 overflow-auto border-l border-border px-4 py-[18px]">
+      <h2 className="text-[10.5px] font-semibold tracking-[0.1em] text-muted uppercase">Looks</h2>
+      {lookIds.map((id) => (
+        <LookRow key={id} id={id} />
+      ))}
+      <Button variant="quiet" className="mx-2 my-2.5">
+        Save this look
+      </Button>
+      <p className="mt-3.5 text-[11px] leading-[1.45] text-dim">Applying a look stops {stops}.</p>
+    </aside>
+  );
+});
+
+export const Stage = memo(function Stage() {
+  const selectedId = useOffice((state) => state.selectedLightId);
+  return (
+    <section className="flex min-w-0 flex-1 flex-col">
+      <EffectBand />
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_clamp(180px,24vw,230px)]">
+        <div className="min-h-0 overflow-auto px-[26px] py-[18px]">
+          {selectedId ? <LightPanel id={selectedId} /> : <p className="text-xs text-dim">Pick a light to set its color and brightness.</p>}
         </div>
-        <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
-          {selectedId ? <LightCard id={selectedId} /> : null}
-        </div>
+        <Looks />
       </div>
-      <aside className="flex w-[210px] shrink-0 flex-col border-l border-border px-3 py-4">
-        <h2 className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">Looks</h2>
-        {lookIds.map((id) => (
-          <LookRow key={id} id={id} />
-        ))}
-        <Button variant="quiet" className="mt-1 px-2">
-          Save this look
-        </Button>
-        <p className="mt-3 text-[11px] text-muted">Applying a look stops the cycle.</p>
-      </aside>
     </section>
   );
 });

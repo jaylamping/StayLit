@@ -40,19 +40,24 @@ function colorHex(color: DeviceColor | null | undefined, fallback: string, force
   if (!color) return fallback;
   const saturation = color.saturation ?? 0;
   if (!forceHue && saturation < 2) return kelvinHex(color.kelvin ?? 3800);
-  const hue = ((color.hue ?? 0) % 360) / 60;
-  const chroma = 1;
+  return hueHex(color.hue ?? 0, saturation);
+}
+
+export function hueHex(hueDegrees: number, saturation = 100) {
+  const hue = (((hueDegrees % 360) + 360) % 360) / 60;
   const x = 1 - Math.abs((hue % 2) - 1);
   const sector = Math.floor(hue);
   const map = [
-    [chroma, x, 0],
-    [x, chroma, 0],
-    [0, chroma, x],
-    [0, x, chroma],
-    [x, 0, chroma],
-    [chroma, 0, x],
-  ][sector] ?? [chroma, 0, 0];
-  const mix = (value: number) => channel(255 * (1 - saturation / 100) + value * 255 * (saturation / 100) * 0.85);
+    [1, x, 0],
+    [x, 1, 0],
+    [0, 1, x],
+    [0, x, 1],
+    [x, 0, 1],
+    [1, 0, x],
+  ][sector] ?? [1, 0, 0];
+  const chroma = 0.72;
+  const floor = 0.28;
+  const mix = (value: number) => channel(255 * (1 - saturation / 100) + (value * chroma + floor) * 255 * (saturation / 100));
   return `#${mix(map[0])}${mix(map[1])}${mix(map[2])}`;
 }
 
@@ -108,8 +113,8 @@ export function lightsFromDevices(devices: DeviceSnap[], roomId: string): Light[
   return devices
     .map((device) => {
       const ability = abilityOf(device);
-      const mode = ability === "white" ? "white" : "color";
       const saturation = device.color?.saturation ?? 0;
+      const mode = ability === "white" || (ability === "color" && saturation < 2) ? "white" : "color";
       const hue = device.color?.hue ?? 0;
       const kelvin = device.color?.kelvin ?? 3800;
       const color = lightSwatch({ mode, hue, saturation, kelvin }, "#d9d3cb");

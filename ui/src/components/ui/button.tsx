@@ -8,10 +8,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        solid: "h-9 rounded-[10px] bg-primary px-4 text-[13.5px] font-semibold text-primary-foreground",
-        ghost: "h-[26px] rounded-full border border-border bg-transparent px-2.5 text-xs font-medium",
-        quiet: "h-auto bg-transparent p-0 text-[13px] font-medium text-muted",
-        icon: "size-7 rounded-md bg-transparent p-0 text-muted [&_svg]:size-3.5",
+        solid: "h-[34px] rounded-[10px] bg-primary px-4 text-[13px] font-semibold tracking-normal text-primary-foreground",
+        ghost: "h-[26px] gap-1.5 rounded-full border border-border-strong bg-transparent px-[11px] text-xs font-medium whitespace-nowrap",
+        quiet: "h-auto bg-transparent p-0 text-xs font-medium text-muted",
+        icon: "size-7 rounded-md bg-transparent p-0 text-muted [&_svg]:size-[15px] [&_svg]:stroke-[1.6]",
       },
     },
     defaultVariants: { variant: "solid" },
