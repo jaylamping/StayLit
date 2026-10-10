@@ -1,0 +1,109 @@
+:root {
+  color-scheme: dark;
+  --bg: #1c1b19;
+  --panel: #262420;
+  --ink: #f4efe6;
+  --muted: #b7aa98;
+  --line: #3c3832;
+  --accent: #e7a04a;
+  font-family: "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+header, main, section {
+  padding: 16px 18px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--line);
+}
+
+h1, h2, h3 { margin: 0 0 8px; font-weight: 600; }
+h1 { font-size: 22px; }
+h2 { font-size: 16px; }
+h3 { font-size: 14px; margin-top: 14px; }
+
+.lede, .hint, .status { color: var(--muted); font-size: 13px; }
+.status { min-height: 1.2em; margin: 0; padding: 8px 18px 0; }
+.hint { margin: 6px 0 10px; }
+
+section {
+  border-bottom: 1px solid var(--line);
+}
+
+button, select, input[type="range"] { font: inherit; }
+
+button {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--accent); }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.row label { flex: 1; min-width: 120px; }
+
+.devices { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+
+.devices button {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.devices button[aria-pressed="true"] { border-color: var(--accent); }
+
+.swatch {
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  margin: 8px 0;
+}
+
+.zones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.zones button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 4px;
+}
+
+.zones button[aria-pressed="true"] { outline: 2px solid var(--ink); }

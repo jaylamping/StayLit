@@ -1,0 +1,13 @@
+{
+  "name": "staylit-sidecar",
+  "private": true,
+  "version": "0.1.0",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "build": "node --check src/index.js && node --check src/host.js && node --check src/protocol.js && node --check src/zones.js && node --check src/effects.js && node --check src/workflows.js && node --check src/store.js && node --check src/lifx-player.js"
+  },
+  "dependencies": {
+    "lifx-lan-client": "2.1.2"
+  }
+}
