@@ -162,15 +162,19 @@ export const Roster = memo(function Roster() {
     }),
   );
   const notice = useOffice((state) => (state.notice?.scope === roomId ? state.notice.message : null));
+  const looking = useOffice((state) => state.lights.length === 0);
   const openRoom = useOffice((state) => state.openRoom);
   const roomOff = useOffice((state) => state.roomOff);
   return (
     <aside className="w-[360px] shrink-0 overflow-auto border-r border-border px-2.5 py-3">
       <RoomMenu roomName={roomName} onOff={roomOff} />
       {notice ? <p className="px-2 text-[11px] text-foreground">{notice}</p> : null}
-      {groupIds.map((id) => (
-        <GroupBlock key={id} groupId={id} />
-      ))}
+      {looking ? <p className="px-2 text-sm text-muted">Looking for lights.</p> : null}
+      {looking
+        ? null
+        : groupIds.map((id) => (
+            <GroupBlock key={id} groupId={id} />
+          ))}
       {pageKind === "group" ? (
         <Button variant="quiet" className="mt-3 px-2" onClick={() => openRoom()}>
           All of {roomName}

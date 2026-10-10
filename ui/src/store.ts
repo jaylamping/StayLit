@@ -41,49 +41,11 @@ export type Effect = {
 } | null;
 export type Notice = { scope: string; message: string } | null;
 
-const zones = ["#3a2418", "#6b3a24", "#b8743c", "#e7b57a", "#f3d7b4", "#d49268", "#8d4e34", "#4a2c22", "#c48458", "#f0c9a0", "#6e3d2a", "#2e1e16"];
+const rooms: Room[] = [{ id: "home", name: "Home", groupIds: ["lights"] }];
 
-const seedLights: Light[] = [
-  { id: "desk", name: "Desk lamp", color: "#e39a45", on: true, offline: false, live: false, kind: "color", brightness: 72 },
-  { id: "monitor", name: "Monitor", color: "#6e8eaa", on: false, offline: false, live: false, kind: "color", brightness: 40 },
-  { id: "shelf", name: "Shelf", color: "#c46a4a", on: false, offline: true, live: false, kind: "color", brightness: 0 },
-  { id: "ceiling", name: "Ceiling", color: "#ffd7ae", on: true, offline: false, live: false, kind: "white", brightness: 100, kelvin: 3800 },
-  { id: "rear", name: "Rear", color: "#ffd7ae", on: false, offline: false, live: false, kind: "white", brightness: 100, kelvin: 3800 },
-  { id: "strip", name: "Lightstrip", color: "#e7b57a", on: true, offline: false, live: false, kind: "strip", brightness: 100, zones },
-  { id: "floor", name: "Floor lamp", color: "#ffc48a", on: true, offline: false, live: false, kind: "white", brightness: 80, kelvin: 2700 },
-  { id: "table", name: "Table", color: "#d4654a", on: true, offline: false, live: false, kind: "color", brightness: 55 },
-];
+const groups: Group[] = [{ id: "lights", name: "Lights", lightIds: [] }];
 
-const rooms: Room[] = [
-  { id: "office", name: "Office", groupIds: ["desk-group", "overhead", "strip-group"] },
-  { id: "living", name: "Living room", groupIds: ["lamps"] },
-];
-
-const groups: Group[] = [
-  { id: "desk-group", name: "Desk", lightIds: ["desk", "monitor", "shelf"] },
-  { id: "overhead", name: "Overhead", lightIds: ["ceiling", "rear"] },
-  { id: "strip-group", name: "Strip", lightIds: ["strip"] },
-  { id: "lamps", name: "Lamps", lightIds: ["floor", "table"] },
-];
-
-const looks: Look[] = [
-  {
-    id: "work",
-    roomId: "office",
-    name: "Work",
-    groupIds: ["desk-group", "overhead", "strip-group"],
-    chips: [{ color: "#e39a45" }, { color: "#ffd7ae" }, { color: "#ffd7ae" }, { color: "#e7b57a" }],
-    accent: "#e39a45",
-  },
-  {
-    id: "wind",
-    roomId: "office",
-    name: "Wind down",
-    groupIds: ["desk-group", "overhead", "strip-group"],
-    chips: [{ color: "#8a3a2a" }, { off: true }, { off: true }, { color: "#6b3a24" }],
-    accent: "#8a3a2a",
-  },
-];
+const looks: Look[] = [];
 
 type OfficeState = {
   lights: Light[];
@@ -140,15 +102,14 @@ function opened() {
   const room = rooms.find((item) => item.id === saved?.roomId) ?? fallback;
   let page: Page = saved?.page ?? { kind: "room" };
   if (page.kind === "group" && !room.groupIds.includes(page.groupId)) page = { kind: "room" };
-  const lookByRoom: Record<string, string | null> = { office: "work", living: null, ...saved?.lookByRoom };
-  const lights = saved?.lights.length ? saved.lights.map((light) => ({ ...light, live: light.live === true })) : seedLights;
+  const lookByRoom: Record<string, string | null> = { home: null, ...saved?.lookByRoom };
   return {
     roomId: room.id,
     page,
     lookByRoom,
     selectedLookId: lookByRoom[room.id] ?? null,
     theme: saved?.theme ?? "system",
-    lights,
+    lights: [],
   };
 }
 
@@ -339,17 +300,17 @@ export const useOffice = create<OfficeState>((set, get) => ({
   startGradient: () => {
     const roomId = get().roomId;
     const previous = get().effect;
+    const strip = get().lights.find((light) => light.kind === "strip" && light.live && !light.offline);
+    if (!strip) return;
     const effect: Effect = {
       name: "Moving gradient",
-      target: "Lightstrip",
+      target: strip.name,
       accent: "#e7b57a",
       roomId,
-      lightIds: ["strip"],
+      lightIds: [strip.id],
       kind: "moving-gradient",
     };
     set({ effect, selectedLightId: null, notice: null });
-    const strip = get().lights.find((light) => light.id === "strip" && light.live && !light.offline);
-    if (!strip) return;
     void lifx("effects.start", {
       kind: "moving-gradient",
       deviceId: strip.id,
@@ -391,13 +352,13 @@ function effectFromStatus(status: { running?: boolean; kind?: string; deviceId?:
       target: "Lightstrip",
       accent: "#e7b57a",
       roomId,
-      lightIds: status.deviceId ? [status.deviceId] : ["strip"],
+      lightIds: status.deviceId ? [status.deviceId] : [],
       kind: "moving-gradient",
     };
   }
   return {
     name: "Color cycle",
-    target: "Desk",
+    target: "Lights",
     accent: "#e39a45",
     roomId,
     lightIds: status.deviceId ? [status.deviceId] : [],
@@ -405,18 +366,38 @@ function effectFromStatus(status: { running?: boolean; kind?: string; deviceId?:
   };
 }
 
+function showDiscovered(devices: DeviceSnap[]) {
+  const current = useOffice.getState();
+  const lights = mergeDevices(current.lights, devices);
+  const lightIds = lights.map((light) => light.id);
+  const selectedLightId = lightIds.includes(current.selectedLightId ?? "") ? current.selectedLightId : null;
+  useOffice.setState({
+    lights,
+    groups: current.groups.map((group) => (group.id === "lights" ? { ...group, lightIds } : group)),
+    selectedLightId,
+  });
+}
+
+let discoveryWatch: ReturnType<typeof setInterval> | undefined;
+
 export function openWindow() {
   void lifx("effects.list").then((status) => {
     if (!status || typeof status !== "object") return;
     const effect = effectFromStatus(status as { running?: boolean; kind?: string; deviceId?: string | null }, useOffice.getState().roomId);
     if (effect) useOffice.setState({ effect });
   });
-  void lifx("list").then((listed) => {
-    if (!listed || typeof listed !== "object") return;
-    const devices = (listed as { devices?: DeviceSnap[] }).devices ?? [];
-    const next = mergeDevices(useOffice.getState().lights, devices);
-    if (next) useOffice.setState({ lights: next });
-  });
+  const pull = () => {
+    void lifx("list")
+      .then((listed) => {
+        if (!listed || typeof listed !== "object") return;
+        const devices = (listed as { devices?: DeviceSnap[] }).devices ?? [];
+        showDiscovered(devices);
+      })
+      .catch(() => undefined);
+  };
+  pull();
+  if (discoveryWatch) return;
+  discoveryWatch = setInterval(pull, 1500);
 }
 
 export function groupPower(lights: Light[], ids: string[]) {

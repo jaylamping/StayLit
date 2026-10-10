@@ -85,22 +85,38 @@ function applyDevice(light: Light, device: DeviceSnap): Light {
   };
 }
 
-export function mergeDevices(lights: Light[], devices: DeviceSnap[]) {
-  if (devices.length === 0) return null;
-  const byId = new Map(devices.map((device) => [device.id, device]));
-  let changed = false;
-  const next = lights.map((light) => {
-    const device = byId.get(light.id);
-    if (!device) {
-      if (light.live && !light.offline) {
-        changed = true;
-        return { ...light, offline: true };
-      }
+export function lightsFromDevices(devices: DeviceSnap[]): Light[] {
+  return devices
+    .map((device) => {
+      const saturation = device.color?.saturation ?? 0;
+      const kind = device.multizone ? "strip" : saturation < 2 ? "white" : "color";
+      const color = colorHex(device.color, "#d9d3cb");
+      const zones = device.zones?.map((zone) => colorHex(zone, color));
+      const light: Light = {
+        id: device.id,
+        name: device.label?.trim() || device.id,
+        color,
+        on: device.power === true,
+        offline: device.online === false,
+        live: true,
+        kind,
+        brightness: device.color?.brightness ?? 100,
+        kelvin: device.color?.kelvin ?? 3800,
+        hue: device.color?.hue ?? 0,
+        saturation,
+      };
+      if (kind === "strip" && zones?.length) light.zones = zones;
       return light;
-    }
-    const updated = applyDevice(light, device);
-    if (updated !== light) changed = true;
-    return updated;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function mergeDevices(lights: Light[], devices: DeviceSnap[]) {
+  if (devices.length === 0) return [];
+  const fresh = lightsFromDevices(devices);
+  const previous = new Map(lights.map((light) => [light.id, light]));
+  return fresh.map((light) => {
+    const prior = previous.get(light.id);
+    return prior ? applyDevice(prior, devices.find((device) => device.id === light.id) ?? { id: light.id }) : light;
   });
-  return changed ? next : lights;
 }
