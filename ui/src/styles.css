@@ -75,7 +75,15 @@ body {
   height: 16px;
   overflow: hidden;
   border-radius: 999px;
-  background: linear-gradient(90deg, #6a301c, var(--meter, #e39a45), #f0c48a, var(--meter, #e39a45), #8a3e22);
+  container-type: inline-size;
+  background: linear-gradient(
+    90deg,
+    var(--meter, #e39a45) 0%,
+    #f0c48a 25%,
+    #fff6ea 50%,
+    #f0c48a 75%,
+    var(--meter, #e39a45) 100%
+  );
 }
 
 .hue-bead {
@@ -87,6 +95,21 @@ body {
   border-radius: 999px;
   background: var(--meter, #e39a45);
   box-shadow: 0 0 0 2px #f6f1ea;
+  animation: hue-loop 8s linear infinite;
+}
+
+.hue-bead::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  box-shadow: inherit;
+  transform: translateX(-100cqi);
+}
+
+@keyframes hue-loop {
+  to { transform: translateX(100cqi); }
 }
 
 .zone-bar {
