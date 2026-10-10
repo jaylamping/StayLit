@@ -24,7 +24,7 @@ function HueMeter({ accent }: { accent: string }) {
 const LightCard = memo(function LightCard({ id }: { id: string }) {
   const light = useOffice((state) => state.lights.find((item) => item.id === id) ?? null);
   const notice = useOffice((state) => (state.notice?.scope === id ? state.notice.message : null));
-  const setBrightness = useOffice((state) => state.setBrightness);
+  const setLightPaint = useOffice((state) => state.setLightPaint);
   const roomIds = useOffice(useShallow((state) => state.rooms.map((room) => room.id)));
   const roomNames = useOffice(useShallow((state) => state.rooms.map((room) => room.name)));
   const groupIds = useOffice(useShallow((state) => state.rooms.find((room) => room.id === light?.roomId)?.groupIds ?? []));
@@ -36,18 +36,65 @@ const LightCard = memo(function LightCard({ id }: { id: string }) {
   const assignRoom = useOffice((state) => state.assignRoom);
   const assignGroup = useOffice((state) => state.assignGroup);
   if (!light) return null;
+  const white = light.kind === "white" || (light.saturation ?? 0) < 2;
   return (
     <Card className="mt-5 max-w-[440px]">
       <div className="text-sm font-semibold tracking-tight">{light.name}</div>
       <p className="mt-0.5 text-xs text-muted">{lightMeta(light)}</p>
       {notice ? <p className="mt-1 text-xs text-foreground">{notice}</p> : null}
-      <div className="mt-3">
+      <span
+        className="mt-3 block size-10 rounded-[9px]"
+        style={
+          light.on
+            ? { background: light.color, boxShadow: `0 0 14px color-mix(in srgb, ${light.color} 45%, transparent)` }
+            : { boxShadow: `inset 0 0 0 1.5px color-mix(in srgb, ${light.color} 75%, transparent)` }
+        }
+      />
+      <div className="mt-3 flex gap-1">
+        <Button variant={white ? "quiet" : "solid"} onClick={() => setLightPaint(light.id, { mode: "color" })}>
+          Color
+        </Button>
+        <Button variant={white ? "solid" : "quiet"} onClick={() => setLightPaint(light.id, { mode: "white" })}>
+          White
+        </Button>
+      </div>
+      <div className="mt-3 grid gap-3">
+        {white ? (
+          <Slider
+            label="Kelvin"
+            value={light.kelvin ?? 3800}
+            min={2500}
+            max={9000}
+            color={light.color}
+            display={`${light.kelvin ?? 3800}K`}
+            onValueChange={(value) => setLightPaint(light.id, { kelvin: value })}
+          />
+        ) : (
+          <>
+            <Slider
+              label="Hue"
+              value={light.hue ?? 0}
+              min={0}
+              max={360}
+              color={light.color}
+              display={`${Math.round(light.hue ?? 0)}`}
+              onValueChange={(value) => setLightPaint(light.id, { hue: value })}
+            />
+            <Slider
+              label="Saturation"
+              value={light.saturation ?? 0}
+              color={light.color}
+              display={`${Math.round(light.saturation ?? 0)}%`}
+              onValueChange={(value) => setLightPaint(light.id, { saturation: value })}
+            />
+          </>
+        )}
         <Slider
           label="Brightness"
           value={light.brightness}
           color={light.color}
           display={`${light.brightness}%`}
-          onValueChange={(value) => setBrightness(light.id, value)}
+          onValueChange={(value) => setLightPaint(light.id, { brightness: value })}
         />
       </div>
       <div className="mt-3 flex flex-wrap gap-1">

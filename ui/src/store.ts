@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { mergeDevices, type DeviceSnap } from "@/lib/devices";
+import { lightSwatch, mergeDevices, type DeviceSnap } from "@/lib/devices";
 import { lifx, sidecarAvailable } from "@/lib/lifx";
 import { loadWindow, saveWindow } from "@/lib/remember";
 
@@ -69,6 +69,10 @@ type OfficeState = {
   selectLook: (lookId: string) => void;
   selectLight: (lightId: string) => void;
   setBrightness: (lightId: string, brightness: number) => void;
+  setLightPaint: (
+    lightId: string,
+    patch: { mode?: "color" | "white"; hue?: number; saturation?: number; kelvin?: number; brightness?: number },
+  ) => void;
   setPower: (lightId: string, on: boolean) => void;
   setGroupPower: (groupId: string, on: boolean) => void;
   roomOff: () => void;
@@ -144,9 +148,40 @@ function opened() {
 }
 
 const powerGen = new Map<string, number>();
-const brightnessHold = new Map<string, number>();
-const brightnessGen = new Map<string, number>();
-const brightnessTimer = new Map<string, ReturnType<typeof setTimeout>>();
+const paintHold = new Map<string, Light>();
+const paintGen = new Map<string, number>();
+const paintTimer = new Map<string, ReturnType<typeof setTimeout>>();
+
+function paintLight(
+  light: Light,
+  patch: { mode?: "color" | "white"; hue?: number; saturation?: number; kelvin?: number; brightness?: number },
+): Light {
+  let kind = light.kind;
+  let hue = patch.hue ?? light.hue;
+  let saturation = patch.saturation ?? light.saturation;
+  let kelvin = patch.kelvin ?? light.kelvin;
+  const brightness = patch.brightness ?? light.brightness;
+  if (patch.mode === "white") {
+    kind = light.kind === "strip" ? "strip" : "white";
+    saturation = 0;
+    kelvin = Math.min(9000, Math.max(2500, kelvin ?? 3800));
+  } else if (patch.mode === "color") {
+    kind = light.kind === "strip" ? "strip" : "color";
+    hue = hue ?? 30;
+    saturation = (saturation ?? 0) < 2 ? 100 : saturation;
+  } else if (patch.kelvin !== undefined) {
+    kelvin = Math.min(9000, Math.max(2500, patch.kelvin));
+  }
+  return {
+    ...light,
+    kind,
+    hue,
+    saturation,
+    kelvin,
+    brightness,
+    color: lightSwatch({ hue, saturation, kelvin }, light.color),
+  };
+}
 
 async function sendLive(live: boolean, run: () => Promise<unknown>) {
   if (!live || !sidecarAvailable()) return;
@@ -201,47 +236,45 @@ export const useOffice = create<OfficeState>((set, get) => ({
     });
   },
   selectLight: (lightId) => set({ selectedLightId: lightId }),
-  setBrightness: (lightId, brightness) => {
+  setBrightness: (lightId, brightness) => get().setLightPaint(lightId, { brightness }),
+  setLightPaint: (lightId, patch) => {
     const current = get().lights.find((light) => light.id === lightId);
-    if (!current) return;
-    if (!brightnessHold.has(lightId)) brightnessHold.set(lightId, current.brightness);
-    const generation = (brightnessGen.get(lightId) ?? 0) + 1;
-    brightnessGen.set(lightId, generation);
+    if (!current || current.offline) return;
+    if (!paintHold.has(lightId)) paintHold.set(lightId, current);
+    const generation = (paintGen.get(lightId) ?? 0) + 1;
+    paintGen.set(lightId, generation);
+    const next = paintLight(current, patch);
     set({
-      lights: get().lights.map((light) => (light.id === lightId ? { ...light, brightness } : light)),
+      lights: get().lights.map((light) => (light.id === lightId ? next : light)),
+      effect: get().effect?.lightIds.includes(lightId) ? null : get().effect,
       notice: get().notice?.scope === lightId ? null : get().notice,
     });
-    const pending = brightnessTimer.get(lightId);
+    const pending = paintTimer.get(lightId);
     if (pending) clearTimeout(pending);
-    brightnessTimer.set(
+    paintTimer.set(
       lightId,
       setTimeout(() => {
         const light = get().lights.find((item) => item.id === lightId);
         if (!light) return;
-        const hue = light.kind === "white" ? 0 : light.hue;
-        const saturation = light.kind === "white" ? 0 : light.saturation;
-        if (hue === undefined || saturation === undefined) {
-          brightnessHold.delete(lightId);
-          return;
-        }
+        const white = (light.saturation ?? 0) < 2 || light.kind === "white";
         void sendLive(light.live, () =>
           lifx("setColor", {
             deviceId: lightId,
             brightness: light.brightness,
             kelvin: light.kelvin ?? 3800,
-            hue,
-            saturation,
+            hue: white ? 0 : (light.hue ?? 0),
+            saturation: white ? 0 : (light.saturation ?? 0),
           }),
         )
           .then(() => {
-            if (brightnessGen.get(lightId) === generation) brightnessHold.delete(lightId);
+            if (paintGen.get(lightId) === generation) paintHold.delete(lightId);
           })
           .catch((err: unknown) => {
-            if (brightnessGen.get(lightId) !== generation) return;
-            const held = brightnessHold.get(lightId);
-            brightnessHold.delete(lightId);
+            if (paintGen.get(lightId) !== generation) return;
+            const held = paintHold.get(lightId);
+            paintHold.delete(lightId);
             set({
-              lights: get().lights.map((item) => (item.id === lightId && held !== undefined ? { ...item, brightness: held } : item)),
+              lights: get().lights.map((item) => (item.id === lightId && held ? held : item)),
               notice: { scope: lightId, message: messageOf(err) },
             });
           });

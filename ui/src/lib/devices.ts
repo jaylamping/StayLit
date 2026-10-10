@@ -27,6 +27,10 @@ function kelvinHex(kelvin: number) {
   return `#${channel(255)}${channel(214 + t * 28)}${channel(170 + t * 70)}`;
 }
 
+export function lightSwatch(color: DeviceColor | null | undefined, fallback = "#d9d3cb") {
+  return colorHex(color, fallback);
+}
+
 function colorHex(color: DeviceColor | null | undefined, fallback: string) {
   if (!color) return fallback;
   const saturation = color.saturation ?? 0;
